@@ -1,6 +1,7 @@
 import { DashboardShell } from "@/components/dashboard-shell"
 import { EmpresaAdmin } from "@/components/configuracion/empresa-admin"
 import { miembrosDe } from "@/engine/empresas"
+import { puedeCrearMarca } from "@/engine/marcas"
 import { cuentaActual, cuentasDelUsuario } from "@/lib/accounts"
 import { usuarioActual } from "@/lib/supabase/auth"
 
@@ -14,7 +15,7 @@ export const metadata = { title: "Empresa · Plogy Studio" }
  */
 export default async function EmpresaPage() {
   const [cuenta, cuentas, yo] = await Promise.all([cuentaActual(), cuentasDelUsuario(), usuarioActual()])
-  const miembros = await miembrosDe(cuenta.id)
+  const [miembros, permiso] = await Promise.all([miembrosDe(cuenta.id), yo ? puedeCrearMarca(yo.id) : Promise.resolve({ puede: false as const })])
   return (
     <DashboardShell title="Empresa">
       <EmpresaAdmin
@@ -23,6 +24,7 @@ export default async function EmpresaPage() {
         miembros={miembros}
         yo={yo?.id ?? ""}
         empresas={cuentas.map((c) => ({ name: c.name, plan: c.plan, rol: c.rol }))}
+        puedeCrear={permiso.puede}
       />
     </DashboardShell>
   )

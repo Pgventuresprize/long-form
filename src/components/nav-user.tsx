@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { CheckIcon, ChevronsUpDownIcon, KeyRoundIcon, LogOutIcon } from "lucide-react"
+import { CheckIcon, ChevronsUpDownIcon, KeyRoundIcon, LayersIcon, LogOutIcon } from "lucide-react"
 
 import { cambiarCuenta } from "@/app/cuenta/actions"
 import { cerrarSesion } from "@/app/(acceso)/actions"
@@ -97,7 +97,7 @@ export function NavUser({
                 {/* La etiqueta de Base UI solo existe dentro de un grupo. */}
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="text-muted-foreground text-xs">
-                    Cuenta
+                    Marca
                   </DropdownMenuLabel>
                   {cuentas.map((c) => (
                     <DropdownMenuItem
@@ -117,6 +117,10 @@ export function NavUser({
 
             <DropdownMenuSeparator />
 
+            <DropdownMenuItem render={<Link href="/marcas" />}>
+              <LayersIcon />
+              Mis marcas
+            </DropdownMenuItem>
             <DropdownMenuItem render={<Link href="/contrasena-nueva" />}>
               <KeyRoundIcon />
               Cambiar contraseña

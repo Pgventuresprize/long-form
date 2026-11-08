@@ -146,6 +146,10 @@ export function MenuFunciones(props: {
                   <div className={s.msep} />
                 </>
               ) : null}
+              <Link href="/marcas" className={s.mi} role="menuitem">
+                <Ico d={<path d="M12 4l8 4-8 4-8-4zM4 12l8 4 8-4M4 16l8 4 8-4" />} />
+                Mis marcas
+              </Link>
               <Link href="/contrasena-nueva" className={s.mi} role="menuitem">
                 <Ico d={(<><path d="M2.6 17.4A2 2 0 0 0 2 18.8V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.2a2 2 0 0 0 1.4-.6l.8-.8a6.5 6.5 0 1 0-4-4z" /><circle cx="16.5" cy="7.5" r=".5" /></>)} />
                 Cambiar contraseña

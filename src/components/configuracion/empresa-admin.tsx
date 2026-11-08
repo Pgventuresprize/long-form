@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { Trash2Icon } from "lucide-react"
 
 import {
@@ -35,12 +36,15 @@ export function EmpresaAdmin({
   miembros,
   yo,
   empresas,
+  puedeCrear = true,
 }: {
   empresa: { name: string; plan: Plan; slug: string }
   esOwner: boolean
   miembros: Miembro[]
   yo: string
   empresas: { name: string; plan: Plan; rol: Rol }[]
+  /** La primera marca es gratis; desde la segunda hace falta marcas_multiples. */
+  puedeCrear?: boolean
 }) {
   const [pending, startTransition] = React.useTransition()
   const [aviso, setAviso] = React.useState<{ ok: boolean; texto: string } | null>(null)
@@ -190,22 +194,36 @@ export function EmpresaAdmin({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Crear empresa</CardTitle>
+          <CardTitle className="text-base">Crear marca</CardTitle>
           <p className="text-muted-foreground mt-1 text-sm">
-            Empieza vacía, sin conexiones y en Basic; quedas como owner y se abre al crearla. Tus empresas:{" "}
+            Empieza vacía, sin conexiones y en Basic; quedas como owner y se abre al crearla. Tus marcas:{" "}
             {empresas.map((e) => `${e.name} (${e.plan}, ${e.rol})`).join(" · ")}.
           </p>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-col gap-1.5 sm:w-80">
-            <Label htmlFor="n-nombre">Nombre</Label>
-            <Input id="n-nombre" value={nuevaNombre} disabled={pending} onChange={(e) => setNuevaNombre(e.target.value)} placeholder="Nombre de la empresa" />
-          </div>
-          <div>
-            <Button disabled={pending || nuevaNombre.trim().length < 2} onClick={() => correr(() => nuevaEmpresa(nuevaNombre), () => setNuevaNombre(""))}>
-              Crear empresa
-            </Button>
-          </div>
+          {puedeCrear ? (
+            <>
+              <div className="flex flex-col gap-1.5 sm:w-80">
+                <Label htmlFor="n-nombre">Nombre</Label>
+                <Input id="n-nombre" value={nuevaNombre} disabled={pending} onChange={(e) => setNuevaNombre(e.target.value)} placeholder="Nombre de la marca" />
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button disabled={pending || nuevaNombre.trim().length < 2} onClick={() => correr(() => nuevaEmpresa(nuevaNombre), () => setNuevaNombre(""))}>
+                  Crear marca
+                </Button>
+                <Link href="/marcas" className="text-muted-foreground text-sm underline-offset-4 hover:underline">
+                  Copiar lo común de otra marca desde Mis marcas
+                </Link>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span className="text-muted-foreground">Crear otra marca está en beta privada.</span>
+              <Button nativeButton={false} variant="outline" size="sm" render={<Link href="/marcas" />}>
+                Ver Mis marcas
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

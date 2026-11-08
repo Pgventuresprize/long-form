@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { cambiarCuenta } from "@/app/cuenta/actions"
 import { registrarActividad } from "@/engine/admin/actividad"
 import { actualizarEmpresa, agregarMiembro, cambiarRol, crearEmpresa, quitarMiembro, reenviarInvitacion, type Rol } from "@/engine/empresas"
+import { puedeCrearMarca } from "@/engine/marcas"
 import { cuentaActual, exigirOwner } from "@/lib/accounts"
 import { supabaseAdmin } from "@/engine/supabase-admin"
 import { usuarioActual } from "@/lib/supabase/auth"
@@ -98,14 +99,18 @@ export async function quitarMiembroDeEmpresa(userId: string): Promise<Resultado>
   return r
 }
 
-/** Toda empresa nueva empieza en Basic: subirla a Advance es cosa de un administrador. */
+/**
+ * Toda marca nueva empieza en Basic: subirla a Advance es cosa de un administrador. La primera
+ * marca es gratis; desde la segunda hace falta `marcas_multiples` (la misma regla de Mis marcas).
+ */
 export async function nuevaEmpresa(nombre: string): Promise<Resultado> {
   const yo = await usuarioActual()
   if (!yo) return { ok: false, error: "Sesión caducada: vuelve a entrar." }
+  if (!(await puedeCrearMarca(yo.id)).puede) return { ok: false, error: "Crear otra marca está en beta privada. Pide acceso desde Mis marcas." }
   const r = await crearEmpresa(nombre, "basic", yo.id)
   if (!r.ok) return r
-  await registrarActividad({ actor: yo.email ? { id: yo.id, email: yo.email } : null, tipo: "plataforma", accion: "Creó una empresa", sobre: nombre.trim(), accountId: r.id, detalle: "Empresa creada en Basic." })
-  // Se abre la empresa recien creada.
+  await registrarActividad({ actor: yo.email ? { id: yo.id, email: yo.email } : null, tipo: "plataforma", accion: "Creó una marca", sobre: nombre.trim(), accountId: r.id, detalle: "Marca creada en Basic." })
+  // Se abre la marca recien creada.
   await cambiarCuenta(r.slug)
-  return { ok: true, aviso: `Empresa creada. Ahora estás en ella: conecta sus servicios en Conexiones.` }
+  return { ok: true, aviso: `Marca creada. Ahora estás en ella: conecta sus servicios en Conexiones.` }
 }
