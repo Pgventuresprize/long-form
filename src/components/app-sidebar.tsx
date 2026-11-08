@@ -74,7 +74,8 @@ export function AppSidebar({
       title: "Marca",
       url: "/marca",
       icon: <FingerprintIcon />,
-      isActive: pathname.startsWith("/marca"),
+      // Exacto: /marcas (Mis marcas) es otra pantalla.
+      isActive: pathname === "/marca" || pathname.startsWith("/marca/"),
       items: [],
     },
     {

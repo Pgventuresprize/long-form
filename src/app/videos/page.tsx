@@ -1,8 +1,10 @@
+import Link from "next/link"
+import { Settings2Icon } from "lucide-react"
+
 import { DashboardShell } from "@/components/dashboard-shell"
+import { Button } from "@/components/ui/button"
 import { exigirAdvance } from "@/lib/accounts"
-import { ConfigVideos } from "@/components/videos/config-videos"
 import { TableroVideos } from "@/components/videos/tablero-videos"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getVideoStudio } from "@/lib/videos-data"
 
 export const dynamic = "force-dynamic"
@@ -22,18 +24,18 @@ export default async function VideosPage() {
   const vista = await getVideoStudio()
   return (
     <DashboardShell title="Video studio">
-      <Tabs defaultValue="tablero" className="flex flex-col gap-4">
-        <TabsList className="h-auto flex-wrap">
-          <TabsTrigger value="tablero">Tablero</TabsTrigger>
-          <TabsTrigger value="config">Configuración</TabsTrigger>
-        </TabsList>
-        <TabsContent value="tablero">
-          <TableroVideos videos={vista.videos} ajustes={vista.ajustes} />
-        </TabsContent>
-        <TabsContent value="config">
-          <ConfigVideos ajustes={vista.ajustes} opciones={vista.opciones} />
-        </TabsContent>
-      </Tabs>
+      <div className="flex flex-col gap-4">
+        {/* La configuracion del short form vive en Marca > Estilo editorial, con las mismas
+            tablas y acciones. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-muted-foreground text-sm">Los ajustes de los videos están en el estilo editorial de la marca.</p>
+          <Button nativeButton={false} variant="outline" size="sm" render={<Link href="/marca?tab=short-form" />}>
+            <Settings2Icon />
+            Configuración
+          </Button>
+        </div>
+        <TableroVideos videos={vista.videos} ajustes={vista.ajustes} />
+      </div>
     </DashboardShell>
   )
 }

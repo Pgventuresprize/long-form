@@ -2,8 +2,12 @@ import { DashboardShell } from "@/components/dashboard-shell"
 import { EditorCtas } from "@/components/marca/editor-ctas"
 import { EditorLista } from "@/components/marca/editor-lista"
 import { PestanaIdentidad } from "@/components/marca/identidad"
+import { PestanaLongForm } from "@/components/marca/long-form/pestana"
 import { MarcaTabs } from "@/components/marca/marca-tabs"
-import { PESTANAS, type Pestana } from "@/components/marca/pestanas"
+import { esPestana, type Pestana } from "@/components/marca/pestanas"
+import { ConfigVideos } from "@/components/videos/config-videos"
+import { cuentaActual } from "@/lib/accounts"
+import { getVideoStudio } from "@/lib/videos-data"
 import { PestanaEjemplos } from "@/components/marca/ejemplos"
 import { PestanaImagenes } from "@/components/marca/imagenes"
 import { PestanaKit } from "@/components/marca/kit"
@@ -27,10 +31,13 @@ export const metadata = { title: "Marca · Plogy Studio" }
  * vacio se llena con valores generales hasta que la marca decida.
  */
 export default async function MarcaPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const [{ tab }, datos] = await Promise.all([searchParams, datosDeMarca()])
-  const inicial: Pestana = PESTANAS.some((p) => p.valor === tab) ? (tab as Pestana) : "identidad"
+  const [{ tab }, datos, cuenta] = await Promise.all([searchParams, datosDeMarca(), cuentaActual()])
+  const inicial: Pestana = esPestana(tab) ? tab : "identidad"
   const { perfil, editorial, variables, estilo, paleta, skills, ejemplos, completitud } = datos
   const pilares = editorial.pilares.map((p) => ({ id: p.id, name: p.name }))
+  // El short form es del plan Advance, como Video studio; su configuracion se mueve aqui tal cual.
+  const advance = cuenta.plan === "advance"
+  const video = advance ? await getVideoStudio() : null
 
   return (
     <DashboardShell title="Marca">
@@ -38,6 +45,7 @@ export default async function MarcaPage({ searchParams }: { searchParams: Promis
         <MarcaTabs
           inicial={inicial}
           completitud={completitud}
+          ocultas={advance ? [] : ["short-form"]}
           paneles={{
             identidad: <PestanaIdentidad perfil={perfil} />,
             voz: <PestanaVoz perfil={perfil} tono={variables.tono} longitud={variables.longitud} />,
@@ -77,6 +85,8 @@ export default async function MarcaPage({ searchParams }: { searchParams: Promis
             imagenes: <PestanaImagenes />,
             skills: <PestanaSkills skills={skills} pilares={pilares} />,
             ejemplos: <PestanaEjemplos ejemplos={ejemplos} pilares={pilares} />,
+            "short-form": video ? <ConfigVideos ajustes={video.ajustes} opciones={video.opciones} /> : null,
+            "long-form": <PestanaLongForm accountId={cuenta.id} />,
           }}
         />
       </div>

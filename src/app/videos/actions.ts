@@ -16,6 +16,8 @@ export type ResultadoVideo = { ok: true; aviso?: string } | { ok: false; error: 
 
 const listo = (aviso?: string): ResultadoVideo => {
   revalidatePath("/videos")
+  // La configuracion del short form vive tambien en Marca > Estilo editorial.
+  revalidatePath("/marca")
   return { ok: true, aviso }
 }
 const fallo = (error: unknown): ResultadoVideo => {

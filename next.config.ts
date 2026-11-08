@@ -11,7 +11,11 @@ const nextConfig: NextConfig = {
     // trazado no lo ve solo. Marca > Kit de diseño dibuja con el, y los
     // carruseles de una marca con kit activo tambien: los hace el tick y se
     // redibujan desde el tablero (la pagina de inicio).
-    "/marca": ["./node_modules/@sparticuz/chromium/bin/**"],
+    // Marca > Estilo editorial > Long form dibuja la vista previa con las plantillas del motor,
+    // que se leen por ruta igual que las fuentes.
+    "/marca": ["./node_modules/@sparticuz/chromium/bin/**", "./long-form/plantillas/**"],
+    "/long-form/**": ["./long-form/plantillas/**"],
+    "/api/long-form/**": ["./long-form/plantillas/**"],
     "/api/content/tick": ["./node_modules/@sparticuz/chromium/bin/**"],
     "/estudio": ["./node_modules/@sparticuz/chromium/bin/**"],
     // "Publicar ahora" corre en la ruta del calendario y dibuja la tarjeta de LinkedIn.

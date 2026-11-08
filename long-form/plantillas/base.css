@@ -1,0 +1,13 @@
+/* Base de toda pieza de long form. Los huecos los llena quien dibuja (el motor en Python y la
+   vista previa de Studio en TypeScript) con el estilo de la marca. */
+{{fuentes}}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:{{ancho}}px;height:{{alto}}px;overflow:hidden;background:{{fondo}}}
+body{font-family:'{{familia}}',Arial,sans-serif;font-weight:700;color:#fff;position:relative}
+:root{
+  --tinta:{{tinta}};--papel:{{papel}};--acento:{{acento}};--acento-texto:{{acento_texto}};--apagado:{{apagado}};
+  --kick:{{kick}};--borde:{{borde}};--caja:rgba(0,0,0,{{caja_alfa}});
+  --grad:{{degradado_h}};--grad-v:{{degradado_v}};--cuerpo:{{cuerpo}}
+}
+.grad{background:var(--grad)}
+.sphere{display:block}
