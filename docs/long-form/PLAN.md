@@ -25,6 +25,21 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
 | D8 | **Música y efectos: MP3 y WAV** (pedido 2026-11-08, cambia la regla del encargo). | Los efectos del preset de Plogy son WAV | Se aceptan los dos. Se valida igual en tres sitios: navegador (extensión y tipo), servidor (firma `ID3`/sincronía de cuadro MP3, o `RIFF....WAVE`) y motor (`ffprobe`: `mp3` o `wav`). La intro del preset, que es `.mp4`, se convierte a MP3 |
 | D9 | **Publicar en YouTube.** El motor y su app provisional lo tienen | El encargo no lo menciona | Queda fuera. El código se conserva en el motor sin conectarlo |
 
+### Decisiones tomadas (2026-11-08)
+
+- **D1.** Se saca el esquema de producción en solo lectura y es la base local. Antes de desplegar, las migraciones
+  nuevas se prueban contra ese esquema recién sacado, para que lo que funciona en local funcione en producción.
+- **D2.** Plan Pro de Supabase para la beta. En local no hace falta.
+- **D3.** Por ahora todo en local: sin Modal ni Groq. El código queda listo para los dos. Cómo lo prueba la gente:
+  sección 12, por decidir.
+- **D4.** Aprobado: Claude corre en Studio, por `llamarClaude`, con las claves, el tope y el registro de cada cuenta.
+  No es el CLI: es la misma llamada a la API que Studio ya hace.
+- **D5.** Cambia: "Crear empresa" pasa a llamarse "Crear marca". La primera marca de cada persona es gratis. Al crear
+  otra marca aparece el paywall de `marcas_multiples`, también en la tarjeta que ya existe en Configuración.
+- **D6.** Aprobado: "Usar la misma conexión de Claude que <marca>" al crear una marca.
+- **D8.** MP3 y WAV.
+- **Después:** conectar otros modelos además de Claude (Gemini, ChatGPT). Fase 8.
+
 ---
 
 ## 1. Lo que hay y lo que se respeta
@@ -103,6 +118,10 @@ que una ruta nueva sin bandera haga fallar la prueba.
 **Mis marcas** (`/marcas`, detrás de `marcas_multiples`)
 - Se entra desde el menú de usuario (`nav-user.tsx`), que gana "Mis marcas" arriba de la lista de cuentas.
 - Lista de las marcas del usuario con su rol, la activa marcada, "Cambiar" (usa `cambiarCuenta`) y "Crear marca".
+- **Una marca gratis.** Mis marcas se ve siempre; lo que pide la bandera es crear la segunda. Cuenta las marcas donde la
+  persona es owner. La primera se crea sin bandera (el registro no cambia). Desde la segunda, sin `marcas_multiples`,
+  aparece el paywall. La tarjeta de Configuración > Empresa pasa a decir "Crear marca" y sigue la misma regla, en la
+  acción (`nuevaEmpresa`), no solo en el botón. Crear una marca desde el panel de administración no tiene límite.
 - **Crear marca**: nombre y, opcional, "Copiar lo común de" una marca donde el usuario es owner. Llama a
   `crearEmpresa` (sin duplicar el registro), copia lo común si se pidió, cambia a la marca nueva y la manda a
   `/empezar`.
@@ -112,9 +131,8 @@ que una ruta nueva sin bandera haga fallar la prueba.
   de los archivos. No se copian secretos, conexiones, kits, piezas ni conversaciones.
 - **Onboarding para la marca nueva.** Corre aunque `ONBOARDING_ACTIVO` esté apagado (la marca nace `pendiente`). Lo
   copiado cuenta como evidencia ya confirmada, así que el Estratega solo pregunta lo que falta.
-- **Pendiente**: ¿con qué clave de Claude trabaja la marca nueva? La recomendación es que el owner pueda marcar
-  "Usar la misma conexión de Claude que <marca>", que copia el token de su `account_secrets`. Sin eso, la marca nueva
-  no tiene Claude hasta conectarlo, igual que hoy.
+- **Clave de Claude** (D6): el owner puede marcar "Usar la misma conexión de Claude que <marca>", que copia el token
+  de su `account_secrets`. Sin eso, la marca nueva no tiene Claude hasta conectarlo, igual que hoy.
 
 **Marca reorganizada** (`/marca`)
 
@@ -447,6 +465,7 @@ ya tiene la pieza.
 | 5 | `clasificar`, los tipos nuevos y las mejoras para todos | Una prueba por tipo; Meet y cámaras siguen pasando |
 | 6 | Mapa de ideas, propuestas, render de clips, zip y envío a la parrilla con etiqueta y filtro | En Rápido: tres clips y dos carruseles aprobados, zip descargado, carruseles en el Estudio con la etiqueta; prueba del envío idempotente |
 | 7 | `docs/long-form/`: cómo funciona, cómo probar, cómo desplegar Modal, variables nuevas, lo que no se pudo probar sin cuentas reales, informe de tiempos y costos | Revisión tuya |
+| 8 | Otros modelos además de Claude: conectar Gemini o ChatGPT por cuenta, en Configuración > Conexiones. `llamarClaude` pasa a ser una puerta con proveedores, con la misma firma para los sitios que la llaman, el mismo tope y el mismo registro de consumo | Las mismas pruebas con cada proveedor; se planea en detalle al llegar |
 
 Cada fase termina con las pruebas en verde, un commit y un resumen corto. Nada se une a main, se despliega ni se
 aplica en producción sin preguntarte.
@@ -481,3 +500,31 @@ aplica en producción sin preguntarte.
   otra cuenta.
 - **Plantillas compartidas** entre Python y TypeScript: si se desalinean, la vista previa miente. La prueba de
   comparación lo frena.
+
+---
+
+## 12. Cómo lo prueba la gente (por decidir)
+
+Studio ya está en Vercel y la base va en Supabase Pro (D2). Lo único que falta es dónde corre el motor. En los cuatro
+caminos el código es el mismo: el motor toma trabajos de `lf_trabajos` y solo cambia dónde vive.
+
+| Camino | Qué es | Una hora de video | Costo | Contras |
+|---|---|---|---|---|
+| A. Tu computador | El motor corre en tu PC y toma trabajos de la cola. Solo conexiones de salida, sin túnel | Varias horas (2 núcleos, 7,9 GB) | 0 | Tu PC prendido; un video a la vez; no llega a la meta |
+| B. Modal | Una función por etapa, en paralelo | La meta de 10 min | Plan Starter: 0 dólares fijos y 30 dólares de uso gratis al mes. CPU a unos 0,047 dólares por núcleo y hora. Estimado por video de una hora: menos de 1 dólar | Una cuenta más |
+| C. Vercel Pro + Sandbox | Máquinas temporales de Vercel (hasta 24 h por máquina en Pro) que corren el motor | Cerca de la meta, repartiendo en varias máquinas | 20 dólares al mes por persona del equipo, con 20 de uso incluidos. CPU activa a 0,128 dólares la hora | Hay que instalar ffmpeg y Chromium en cada máquina; el paralelismo se arma a mano |
+| D. Servidor fijo (Hetzner, Railway) | Un servidor siempre prendido con el Docker del motor | 30 a 60 min con 8 núcleos dedicados | Unos 140 euros al mes por 8 núcleos dedicados (Hetzner subió precios en junio de 2026) | No reparte en paralelo; paga aunque no se use |
+
+**Pagar Vercel por sí solo no lo resuelve.** Sus funciones tienen tope de duración, el paquete no admite ffmpeg,
+Chromium y OpenCV juntos, el disco no persiste y el cuerpo de una petición se corta a 4,5 MB. Lo que sí sirve de
+Vercel Pro es Sandbox (camino C), que es otro producto.
+
+**Transcripción.** Groq cuesta unos 0,04 dólares por hora de audio. Sin Groq, Whisper en un CPU tarda decenas de
+minutos por hora de audio.
+
+**Recomendación.** Construir y probar en local (A) mientras dura el desarrollo, y para la beta con gente de fuera
+abrir Modal (B): con los 30 dólares gratis caben decenas de videos de una hora al mes y es el único camino que llega a
+los 10 minutos sin armar el paralelismo a mano. Si se quiere un solo proveedor, C es la alternativa.
+
+Precios consultados el 2026-11-08 en modal.com/pricing, groq.com/pricing, vercel.com/docs/vercel-sandbox/pricing y
+en sitios que siguen los precios de Hetzner. Se confirman al crear las cuentas.
