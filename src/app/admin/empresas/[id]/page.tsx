@@ -5,6 +5,8 @@ import { ArrowLeftIcon } from "lucide-react"
 import { AdminShell } from "@/components/admin/admin-shell"
 import { BotonCambiarPlan, BotonSuspension } from "@/components/admin/empresa-acciones"
 import { EmpresaMiembros } from "@/components/admin/empresa-miembros"
+import { SelectorFuncionEmpresa } from "@/components/admin/funciones"
+import { funcionesDe } from "@/engine/funciones"
 import { Cifra, EstadoClaude, EstadoEmpresa, PlanBadge, fechaCorta, fechaDia } from "@/components/admin/piezas"
 import { ConsumoGrafico } from "@/components/configuracion/consumo-grafico"
 import { Badge } from "@/components/ui/badge"
@@ -39,7 +41,7 @@ export default async function AdminEmpresaPage({ params }: { params: Promise<{ i
     return fila ? [{ id: u.id, email: u.email, rol: fila.rol, ultimoIngreso: u.ultimoIngreso, estado: u.estado }] : []
   })
   const actividad = p.actividad.filter((a) => a.accountId === id).slice(0, 12)
-  const canva = await canvaConectado(id)
+  const [canva, funciones] = await Promise.all([canvaConectado(id), funcionesDe(id)])
   const conexiones: [string, boolean | null][] = [
     ["Serper", e.serper],
     ["Instagram", e.instagram],
@@ -139,6 +141,18 @@ export default async function AdminEmpresaPage({ params }: { params: Promise<{ i
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Funciones en beta</CardTitle>
+          <CardDescription>La excepción de esta empresa manda sobre lo que está encendido para todos.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col divide-y">
+          {funciones.map((f) => (
+            <SelectorFuncionEmpresa key={f.clave} accountId={e.id} empresa={e.name} clave={f.clave} nombre={f.nombre} cuenta={f.cuenta} global={f.global} />
+          ))}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

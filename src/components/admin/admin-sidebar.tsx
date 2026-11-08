@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ArrowLeftIcon, BarChart3Icon, Building2Icon, GemIcon, HistoryIcon, LayoutDashboardIcon, ShieldCheckIcon, UsersIcon } from "lucide-react"
+import { ArrowLeftIcon, BarChart3Icon, Building2Icon, FlaskConicalIcon, GemIcon, HistoryIcon, LayoutDashboardIcon, ShieldCheckIcon, UsersIcon } from "lucide-react"
 
 import { PlogyStudioLogo } from "@/components/plogy-studio-logo"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -24,6 +24,7 @@ const SECCIONES = [
   { titulo: "Usuarios", url: "/admin/usuarios", icono: UsersIcon },
   { titulo: "Consumo", url: "/admin/consumo", icono: BarChart3Icon },
   { titulo: "Planes", url: "/admin/planes", icono: GemIcon },
+  { titulo: "Funciones", url: "/admin/funciones", icono: FlaskConicalIcon },
   { titulo: "Actividad", url: "/admin/actividad", icono: HistoryIcon },
   { titulo: "Accesos", url: "/admin/accesos", icono: ShieldCheckIcon },
 ]

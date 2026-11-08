@@ -45,7 +45,7 @@ export function ChatApp(props: {
   inicial: EstadoChat
   noticiasIniciales: NoticiaAdjunta[]
   usuario: { nombre: string; email: string }
-  cuenta: { nombre: string; slug: string; plan: string }
+  cuenta: { nombre: string; slug: string; plan: string; funciones?: string[] }
   cuentas: { nombre: string; slug: string }[]
 }) {
   const params = useSearchParams()

@@ -26,6 +26,7 @@ export function AppSidebar({
   cuentas,
   cuenta,
   esAdmin = false,
+  funciones = [],
   ...props
 }: {
   email: string
@@ -33,6 +34,8 @@ export function AppSidebar({
   cuenta: Cuenta
   /** Solo para quien esta en `platform_admins`; a los demas ni se les anuncia. */
   esAdmin?: boolean
+  /** Las funciones en beta que la cuenta tiene encendidas (`engine/funciones.ts`). */
+  funciones?: string[]
 } & React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
   // El estudio, la publicacion y los videos son del plan advance; una empresa
@@ -130,6 +133,16 @@ export function AppSidebar({
       url: "/videos",
       icon: <ClapperboardIcon />,
       isActive: pathname.startsWith("/videos"),
+      items: [],
+    },
+    {
+      // Grabaciones largas: el video editado y lo que sale de el. En beta: sin la funcion se ve
+      // con candado y la pagina muestra el paywall.
+      title: "Long-form",
+      url: "/long-form",
+      icon: <ClapperboardIcon />,
+      isActive: pathname.startsWith("/long-form"),
+      bloqueado: !funciones.includes("long_form"),
       items: [],
     },
     {

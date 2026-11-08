@@ -8,7 +8,7 @@ import { supabaseAdmin } from "../supabase-admin"
  * de lanzar: quien llama decide, y el panel avisa si una accion no quedo registrada.
  */
 
-export type TipoActividad = "plan" | "acceso" | "bloqueo" | "plataforma"
+export type TipoActividad = "plan" | "acceso" | "bloqueo" | "plataforma" | "funcion"
 
 export type NuevaActividad = {
   /** Quien lo hizo. Sin actor, lo hizo el sistema. */

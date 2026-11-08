@@ -18,7 +18,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
-import { ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon, LockIcon } from "lucide-react"
 
 export function NavMain({
   items,
@@ -28,6 +28,8 @@ export function NavMain({
     url: string
     icon: React.ReactNode
     isActive?: boolean
+    /** Una funcion en beta que la cuenta no tiene: se ve con candado y abre su paywall. */
+    bloqueado?: boolean
     items?: {
       title: string
       url: string
@@ -52,6 +54,12 @@ export function NavMain({
             >
               {item.icon}
               <span>{item.title}</span>
+              {item.bloqueado ? (
+                <>
+                  <LockIcon className="text-muted-foreground ml-auto size-3.5" aria-hidden />
+                  <span className="sr-only">(beta privada)</span>
+                </>
+              ) : null}
             </SidebarMenuButton>
             {item.items?.length ? (
               <>

@@ -4,6 +4,7 @@ import { ChatApp } from "@/components/chat/chat-app"
 import { cuentaActual, cuentasDelUsuario } from "@/lib/accounts"
 import { estadoChat, noticiasConAngulo } from "@/lib/chat-data"
 import { nombreDe } from "@/lib/chat-nombre"
+import { funcionesEncendidas } from "@/lib/funciones"
 import { debeHacerOnboarding } from "@/lib/onboarding"
 import { usuarioActual } from "@/lib/supabase/auth"
 
@@ -21,7 +22,7 @@ export default async function InicioPage({ searchParams }: { searchParams: Promi
   const [cuenta, cuentas, { c }] = await Promise.all([cuentaActual(), cuentasDelUsuario(), searchParams])
   if (await debeHacerOnboarding(cuenta)) redirect("/empezar")
   const abierta = c && /^[0-9a-f-]{36}$/i.test(c) ? c : null
-  const [estado, noticias] = await Promise.all([estadoChat(cuenta.id, abierta), noticiasConAngulo(cuenta.id)])
+  const [estado, noticias, funciones] = await Promise.all([estadoChat(cuenta.id, abierta), noticiasConAngulo(cuenta.id), funcionesEncendidas(cuenta.id)])
 
   return (
     <ChatApp
@@ -30,7 +31,7 @@ export default async function InicioPage({ searchParams }: { searchParams: Promi
       inicial={estado}
       noticiasIniciales={noticias}
       usuario={{ nombre: nombreDe(usuario), email: usuario.email ?? "" }}
-      cuenta={{ nombre: cuenta.name, slug: cuenta.slug, plan: cuenta.plan }}
+      cuenta={{ nombre: cuenta.name, slug: cuenta.slug, plan: cuenta.plan, funciones }}
       cuentas={cuentas.map((x) => ({ nombre: x.name, slug: x.slug }))}
     />
   )

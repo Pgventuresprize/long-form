@@ -11,7 +11,7 @@ import { AGENTES } from "@/lib/agentes-catalogo"
 import s from "./chat.module.css"
 import { cx, I, Ico, Logo, useFuera } from "./comun"
 
-const NAV: { nombre: string; url: string; d: React.ReactNode; sub?: boolean; advance?: boolean }[] = [
+const NAV: { nombre: string; url: string; d: React.ReactNode; sub?: boolean; advance?: boolean; funcion?: string }[] = [
   { nombre: "Chat", url: "/", d: <path d="M4 5h16v11H9l-5 4z" /> },
   { nombre: "Estudio", url: "/estudio", d: <path d="M5 4v16M10 4v16M15 4l4 16" /> },
   { nombre: "Calendario", url: "/calendario", d: <path d="M5 6h14v14H5zM5 10h14M9 3v5M15 3v5" />, advance: true },
@@ -23,6 +23,8 @@ const NAV: { nombre: string; url: string; d: React.ReactNode; sub?: boolean; adv
   { nombre: "Publicación", url: "/publicacion", d: <path d="M21 3L3 10l7 3 3 7z" />, advance: true },
   { nombre: "Recursos", url: "/recursos", d: <path d="M6 3h9l4 4v14H6zM9 12h7M9 16h7" /> },
   { nombre: "Video studio", url: "/videos", d: <path d="M3 6h14v12H3zM17 10l4-2v8l-4-2" />, advance: true },
+  // En beta: sin la funcion se ve con candado y abre el paywall.
+  { nombre: "Long-form", url: "/long-form", d: <path d="M4 11h16v9H4zM4 11l2-6 14 2-1.5 4M8.5 5.6l2.5 4.4M13.5 6.3l2.5 4.4" />, funcion: "long_form" },
   { nombre: "Agentes", url: `/agentes/${AGENTES[0].clave}`, d: <path d="M5 9h14v10H5zM12 5v4M9 14h.01M15 14h.01" />, sub: true },
   {
     nombre: "Configuración",
@@ -40,7 +42,7 @@ const NAV: { nombre: string; url: string; d: React.ReactNode; sub?: boolean; adv
 export function MenuFunciones(props: {
   onCerrar: () => void
   usuario: { nombre: string; email: string }
-  cuenta: { nombre: string; slug: string; plan: string }
+  cuenta: { nombre: string; slug: string; plan: string; funciones?: string[] }
   cuentas: { nombre: string; slug: string }[]
 }) {
   const router = useRouter()
@@ -88,6 +90,12 @@ export function MenuFunciones(props: {
               <Link key={n.nombre} href={n.url} className={s.nav}>
                 <Ico d={n.d} />
                 {n.nombre}
+                {n.funcion && !(props.cuenta.funciones ?? []).includes(n.funcion) ? (
+                  <span className={s.chev} title="Beta privada">
+                    <Ico d={<path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" />} />
+                    <span className="sr-only">(beta privada)</span>
+                  </span>
+                ) : null}
                 {n.sub ? (
                   <span className={s.chev}>
                     <Ico d={I.derecha} />

@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import type { Plan } from "@/engine/accounts"
 import { registrarActividad, type NuevaActividad } from "@/engine/admin/actividad"
 import { guardarRegistroAbierto } from "@/engine/admin/ajustes"
+import { cambiarDeCuenta, cambiarGlobal, esFuncion, type Funcion } from "@/engine/funciones"
 import { actualizarEmpresa, agregarMiembro, cambiarRol, crearEmpresa, quitarMiembro, reenviarInvitacion, usuarioPorCorreo, type Rol } from "@/engine/empresas"
 import { supabaseAdmin } from "@/engine/supabase-admin"
 import { adminActual, type Admin } from "@/lib/admin"
@@ -300,6 +301,56 @@ export async function cambiarRegistro(abierto: boolean): Promise<Resultado> {
       tipo: "plataforma",
       accion: abierto ? "Abrió el registro" : "Cerró el registro",
       sobre: "Plataforma",
+    })
+  })
+}
+
+// ------------------------------------------------------------ Funciones en beta
+
+const NOMBRE_FUNCION: Record<Funcion, string> = {
+  long_form: "Long-form",
+  marcas_multiples: "Marcas múltiples",
+  estilo_long_form: "Estilo long form",
+}
+
+/** Encender o apagar una funcion para todas las empresas. Pide motivo: llega a todos. */
+export async function cambiarFuncionGlobal(clave: string, encendida: boolean, motivo: string): Promise<Resultado> {
+  return comoAdmin(async (yo) => {
+    if (!esFuncion(clave)) return fallo("Esa función no existe.")
+    const m = motivoValido(motivo)
+    if (!m) return fallo("Escribe el motivo.")
+    const error = await cambiarGlobal(clave, encendida)
+    if (error) return fallo(`No se pudo guardar: ${error}`)
+    return hecho(yo, `${NOMBRE_FUNCION[clave]} ${encendida ? "encendida" : "apagada"} para todas las empresas.`, {
+      tipo: "funcion",
+      accion: encendida ? "Encendió una función para todos" : "Apagó una función para todos",
+      sobre: NOMBRE_FUNCION[clave],
+      motivo: m,
+    })
+  })
+}
+
+/**
+ * La excepcion de una empresa: `si`, `no` o `global` (quitar la excepcion y seguir lo de todos).
+ * Dar acceso no pide motivo; quitarlo si.
+ */
+export async function cambiarFuncionEmpresa(accountId: string, clave: string, valor: "si" | "no" | "global", motivo = ""): Promise<Resultado> {
+  return comoAdmin(async (yo) => {
+    if (!esFuncion(clave)) return fallo("Esa función no existe.")
+    const e = await empresa(accountId)
+    if (!e) return fallo("Esa empresa no existe.")
+    const m = motivo.trim() || null
+    if (valor === "no" && !motivoValido(motivo)) return fallo("Escribe el motivo.")
+    const error = await cambiarDeCuenta(accountId, clave, valor === "global" ? null : valor === "si", { id: yo.id, motivo: m })
+    if (error) return fallo(`No se pudo guardar: ${error}`)
+    const texto = valor === "si" ? "ya tiene" : valor === "no" ? "ya no tiene" : "sigue lo de todos en"
+    return hecho(yo, `${e.name} ${texto} ${NOMBRE_FUNCION[clave]}.`, {
+      tipo: "funcion",
+      accion: valor === "si" ? "Dio acceso a una función" : valor === "no" ? "Quitó acceso a una función" : "Quitó la excepción de una función",
+      sobre: e.name,
+      accountId,
+      detalle: NOMBRE_FUNCION[clave],
+      motivo: m,
     })
   })
 }

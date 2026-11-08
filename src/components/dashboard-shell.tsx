@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/sidebar"
 import { cuentaActual, cuentasDelUsuario } from "@/lib/accounts"
 import { adminActual } from "@/lib/admin"
+import { funcionesEncendidas } from "@/lib/funciones"
 import { usuarioActual } from "@/lib/supabase/auth"
 
 /**
@@ -42,6 +43,7 @@ export async function DashboardShell({
   // La cuenta primero: los conteos de nichos ya salen acotados a ella.
   const [cuenta, cuentas, admin] = await Promise.all([cuentaActual(), cuentasDelUsuario(), adminActual()])
   if (await debeHacerOnboarding(cuenta)) redirect("/empezar")
+  const funciones = await funcionesEncendidas(cuenta.id)
 
   return (
     <SidebarProvider>
@@ -50,6 +52,7 @@ export async function DashboardShell({
         cuentas={cuentas}
         cuenta={cuenta}
         esAdmin={admin !== null}
+        funciones={funciones}
       />
       <SidebarInset>
         <header className="bg-background/85 sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b px-4 backdrop-blur md:px-6">
