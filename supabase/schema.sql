@@ -417,16 +417,16 @@ create table if not exists public.content_templates (
   account_id      uuid        not null references public.accounts (id) on delete cascade,
   name            text        not null,
   format          text        not null,
-  estilo          jsonb       not null default {}::jsonb,
+  estilo          jsonb       not null default '{}'::jsonb,
   estructura      jsonb,       -- paginas, su rol y sus marcadores, leidos de Canva
   canva_design_id text,
   canva_edit_url  text,
   thumbnail_url   text,
-  status          text        not null default borrador,
+  status          text        not null default 'borrador',
   error           text,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
-  constraint content_templates_status_check check (status in (borrador, creando, lista, error))
+  constraint content_templates_status_check check (status in ('borrador', 'creando', 'lista', 'error'))
 );
 create index if not exists content_templates_account_idx on public.content_templates (account_id, format);
 alter table public.content_templates enable row level security;
