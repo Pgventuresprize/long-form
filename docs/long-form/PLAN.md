@@ -25,6 +25,23 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
 | D8 | **Música y efectos: MP3 y WAV** (pedido 2026-11-08, cambia la regla del encargo). | Los efectos del preset de Plogy son WAV | Se aceptan los dos. Se valida igual en tres sitios: navegador (extensión y tipo), servidor (firma `ID3`/sincronía de cuadro MP3, o `RIFF....WAVE`) y motor (`ffprobe`: `mp3` o `wav`). La intro del preset, que es `.mp4`, se convierte a MP3 |
 | D9 | **Publicar en YouTube.** El motor y su app provisional lo tienen | El encargo no lo menciona | Queda fuera. El código se conserva en el motor sin conectarlo |
 
+### Estado
+
+**Fase 2 hecha (2026-11-08), en local:**
+- **Base local:** `long-form/local/armar-base.ps1`.
+- **Banderas:** paywall, `/admin/funciones` y la tarjeta de cada empresa.
+- **Mis marcas:** la primera marca es gratis; desde la segunda, paywall. Se puede copiar lo común y la conexión de
+  Claude.
+- **Marca:** dividida en dos grupos. Short form se movió a Marca.
+- **Estilo long form:** con vista previa y onboarding. El preset de Plogy se importa con
+  `scripts/longform-importar-preset.ts`.
+- **Pruebas:** `funciones`, `longform-estilo`, `longform-banderas` y la prueba en vivo `longform-banderas-vivo`.
+
+**Lo que cambió respecto al plan al construir:**
+- **Personas recurrentes:** viven dentro de `lf_estilos.config`, no en una tabla `lf_personas`.
+- **Plantillas de los gráficos:** quedaron en `long-form/plantillas` como HTML y CSS con huecos. Studio ya las usa;
+  el motor las leerá en la fase 3.
+
 ### Decisiones tomadas (2026-11-08)
 
 - **D1.** Se saca el esquema de producción en solo lectura y es la base local. Antes de desplegar, las migraciones
@@ -188,7 +205,6 @@ sin políticas, y las funciones son `security definer` con `revoke execute ... f
 |---|---|
 | `lf_estilos` | Estilo long form por cuenta: `account_id` pk, `config jsonb` (lo de la sección 3), `esfuerzo_defecto`, `version`, `listo` (pasó el onboarding) |
 | `lf_biblioteca` | Audio por cuenta: `tipo` (`musica`, `sfx`), `momento` (`intro`, `cierre`, `rotulo`, `barra`, `popup`, `transicion`, `cita`), `ruta`, `formato` (`mp3`, `wav`), `duracion_s`, `volumen` |
-| `lf_personas` | Personas recurrentes: `nombre`, `cargo`, `handle`, `foto_ruta`, `activo` |
 | `lf_proyectos` | `titulo`, `esfuerzo` (`rapido`, `normal`, `detallado`), `estado` (`subiendo`, `procesando`, `revision`, `listo`, `difusion`, `enviado`, `error`), `fase` y `detalle`, `progreso`, `tipo_grabacion` y `evidencia`, `notas`, `cta_defecto`, `duracion_s`, `miniatura`, `spec jsonb` y `datos jsonb` (estado de etapas, como hoy), `creado_por uuid` |
 | `lf_archivos` | Entradas y salidas: `tipo` (`fuente`, `audio`, `pdf`, `foto`, `salida`, `proxy`, `clip`, `zip`), `ruta`, `bytes`, `mime`, `version`, `subida` (`pendiente`, `lista`). Único por `ruta`: se arregla que el motor inserte una fila en cada subida |
 | `lf_trabajos` | La cola: `etapa`, `quien` (`motor`, `studio`), `estado`, `intentos`, `worker`, `lease_hasta`, `error`, `inicio`, `fin`, `costo jsonb` |

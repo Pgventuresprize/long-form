@@ -45,6 +45,8 @@ async function main() {
   p.setDefaultTimeout(240000)
   await p.setViewport({ width: 1440, height: 1000 })
   await entrar(p)
+  // LF_CUENTA=<slug> abre esa marca (la cookie solo propone; la pertenencia se comprueba igual).
+  if (process.env.LF_CUENTA) await p.setCookie({ name: "hancel_cuenta", value: process.env.LF_CUENTA, url: BASE })
   const hechas: string[] = []
   for (const ruta of RUTAS) {
     for (const t of TAMANOS) {
