@@ -37,7 +37,35 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
   `scripts/longform-importar-preset.ts`.
 - **Pruebas:** `funciones`, `longform-estilo`, `longform-banderas` y la prueba en vivo `longform-banderas-vivo`.
 
+**Fase 3 (2026-11-08), en local:**
+- **Dónde quedó el motor:** en `long-form/motor`, con la migración `2026-11-08-long-form.sql` (proyectos,
+  archivos, cola, eventos, avisos, ideas, piezas y envíos).
+- **Claude:** el puente pasa por `/api/long-form/ia`.
+- **Plantillas compartidas:** Python y TypeScript dan el mismo HTML, con prueba.
+- **Paralelo:** gráficos en varios Chromium y transcripción por Groq cuando haya clave.
+- **Niveles de esfuerzo y costo por etapa:** funcionando.
+- **Servidor local:** `/despertar` local listo. `modal_app.py` está listo, sin probar.
+- **Medido en esta máquina** (2 núcleos), 6 minutos de dos cámaras en Rápido, sin Claude ni Groq:
+
+  | Etapa | Tiempo |
+  |---|---|
+  | Ingesta | 34 s |
+  | Análisis | 64 s |
+  | Transcripción (faster-whisper) | 454 s |
+  | Plan | 24 s |
+  | Gráficos | 93 s |
+  | Render | 602 s |
+  | Control de calidad | 115 s |
+  | **Total** | **23 min** |
+
+  El control de calidad salió limpio.
+
 **Lo que cambió respecto al plan al construir:**
+- **Paralelo en Modal:** cada etapa corre en un contenedor grande y reparte su trabajo en hilos (trozos del
+  render, Chromium por hilo, partes de transcripción), en vez de repartir entre contenedores con `.map`. Es más
+  simple y los trozos del render no se mueven entre máquinas. Si con 32 núcleos no se llega a la meta, el siguiente
+  paso es repartir el render entre contenedores.
+- **Clips:** no se renderizan con el largo (`opciones.clips = 0`); salen de Difusión.
 - **Personas recurrentes:** viven dentro de `lf_estilos.config`, no en una tabla `lf_personas`.
 - **Plantillas de los gráficos:** quedaron en `long-form/plantillas` como HTML y CSS con huecos. Studio ya las usa;
   el motor las leerá en la fase 3.
