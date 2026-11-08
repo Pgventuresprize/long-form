@@ -40,6 +40,8 @@ const ABIERTAS = [
   "/api/publicacion/tick",
   "/api/calendario/tick",
   "/api/chat/pasada",
+  // La llama el motor de long form con `LF_MOTOR_SECRETO`, no un navegador.
+  "/api/long-form/ia",
 ]
 
 /** Con sesion no ofrecen nada: se va al inicio. */

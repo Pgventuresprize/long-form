@@ -1,0 +1,3 @@
+﻿# El motor de long form corre en Modal (o en local), nunca en Vercel.
+long-form/motor/
+

@@ -49,3 +49,9 @@ next-env.d.ts
 # que usa: la fuente en src/app/fonts y el logo en plogy-studio-logo.tsx.
 plogy-brand-kit/
 scripts/.salida/
+
+# Motor de long form: carpeta de trabajo (cache) y bytecode.
+long-form/motor/.datos/
+__pycache__/
+*.pyc
+
