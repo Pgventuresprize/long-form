@@ -153,8 +153,9 @@ def colocar_fijas(ctx, g, mapa, personas, segs):
     ctas = [c for c in (ctx.spec.get('ctas') or m.ctas) if c in m.ctas]
     if ctas and total > 120:
         cada = m.regla('barra_cada_min', 7) * 60
-        n = max(len(ctas) * m.regla('barras_por_cta_min', 2), int(total // cada))
-        n = min(n, max(int(total // 60), 1))
+        # El minimo por CTA solo aplica a videos largos: en uno corto, una barra cada 2,5 min como mucho.
+        minimo = len(ctas) * m.regla('barras_por_cta_min', 2) if total >= 30 * 60 else len(ctas)
+        n = max(int(total // cada), min(minimo, max(int(total // 150), 1)))
         for i in range(n):
             ideal = 20 + (total - 40) * (i + 0.5) / n
             for d in sorted(range(-90, 91, 2), key=abs):

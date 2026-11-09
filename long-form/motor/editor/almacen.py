@@ -93,6 +93,9 @@ class AlmacenLocal(Almacen):
     def etapa_hecha(self, pid, etapa, inicio, fin, costo):
         self.log(pid, f'{etapa} en {fin - inicio:.1f} s · {json.dumps(costo, ensure_ascii=False)}', 'etapa', etapa)
 
+    def actualizar_proyecto(self, pid, campos):
+        pass
+
     def aviso(self, pid, tipo, titulo, cuerpo='', accion=None):
         self.log(pid, f'aviso {tipo}: {titulo}', 'aviso')
 
@@ -258,6 +261,9 @@ class AlmacenSupabase(Almacen):
                                       'mensaje': mensaje[:4000]})
         except Exception:  # noqa: BLE001
             pass
+
+    def actualizar_proyecto(self, pid, campos):
+        self._patch('lf_proyectos', {'id': f'eq.{pid}'}, campos)
 
     def etapa_hecha(self, pid, etapa, inicio, fin, costo):
         """La linea de tiempo: cuanto tardo la etapa y cuanto costo."""

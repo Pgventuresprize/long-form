@@ -68,4 +68,12 @@ def correr(ctx):
         ctx.local(a)
 
     ctx.guardar('ingesta', {'fuentes': info, 'laminas': len(laminas)})
+    if not ctx.reconstruyendo:
+        # La miniatura del tablero y la duracion: un cuadro de la primera fuente.
+        f = info[0]
+        mini = ctx.salida / 'miniatura.jpg'
+        ctx.salida.mkdir(exist_ok=True)
+        ffm.correr(['-ss', f'{f["duracion"] * 0.2:.1f}', '-i', f['archivo'], '-frames:v', '1', '-vf', 'scale=640:-2', '-q:v', '4', mini])
+        ruta = ctx.alm.subir(ctx.pid, mini, 'miniatura.jpg', 'image/jpeg', clase='miniatura')
+        ctx.alm.actualizar_proyecto(ctx.pid, {'miniatura': ruta, 'duracion_s': round(max(x['duracion'] for x in info), 1)})
     ctx.avance('Listo', 1)

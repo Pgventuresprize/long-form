@@ -4,6 +4,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { Campana } from "@/components/long-form/campana"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -76,6 +77,12 @@ export async function DashboardShell({
               </BreadcrumbList>
             </Breadcrumb>
           </div>
+          {/* Los avisos de Long-form, solo para las marcas que lo tienen. */}
+          {funciones.includes("long_form") ? (
+            <div className="ml-auto">
+              <Campana />
+            </div>
+          ) : null}
         </header>
         <div className="flex min-w-0 flex-1 flex-col gap-6 p-4 pt-6 md:p-6 md:pt-8">
           <h1 className="font-display text-3xl leading-tight">{title}</h1>

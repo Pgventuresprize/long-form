@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
+import { ProveedorSubidas } from "@/components/long-form/subidas";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,7 +37,10 @@ export default function RootLayout({
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} ${plogyDisplay.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      {/* Las subidas de Long-form viven aqui: siguen aunque se cambie de pantalla. */}
+      <body className="min-h-full flex flex-col">
+        <ProveedorSubidas>{children}</ProveedorSubidas>
+      </body>
     </html>
   );
 }

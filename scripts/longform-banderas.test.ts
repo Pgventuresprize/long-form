@@ -21,7 +21,10 @@ const RAIZ = path.join(__dirname, "..")
 const PROTEGIDOS = ["src/app/long-form", "src/app/api/long-form", "src/app/marca/long-form-actions.ts", "src/app/marcas"]
 
 /** Lo que cuenta como comprobar la bandera (o el paywall de crear marca). */
-const GUARDAS = /\b(accesoA|idDeCuentaCon|cuentaDeRutaCon|puedeCrearMarca|tieneFuncion|exigirFuncionMotor)\s*\(/
+const GUARDAS = /\b(accesoA|idDeCuentaCon|cuentaDeRutaCon|puedeCrearMarca|tieneFuncion|proyectoPropio)\s*\(/
+
+/** Los ayudantes que cuentan como guarda tienen que comprobar la bandera ellos mismos. */
+const AYUDANTES: [string, string][] = [["src/app/long-form/actions.ts", "proyectoPropio"]]
 
 function archivos(rel: string): string[] {
   const abs = path.join(RAIZ, rel)
@@ -55,6 +58,15 @@ test("cada pagina, accion y ruta de las funciones en beta comprueba su bandera",
   }
   assert.ok(revisadas > 0, "no encontro nada que revisar")
   assert.deepEqual(sinGuarda, [], `Sin comprobar la bandera:\n${sinGuarda.join("\n")}`)
+})
+
+test("los ayudantes que hacen de guarda comprueban la bandera", () => {
+  for (const [rel, nombre] of AYUDANTES) {
+    const codigo = readFileSync(path.join(RAIZ, rel), "utf8")
+    const m = new RegExp(`async function ${nombre}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(codigo)
+    assert.ok(m, `no encontre ${nombre} en ${rel}`)
+    assert.match(m[1], /idDeCuentaCon\(/, `${nombre} no comprueba la bandera`)
+  }
 })
 
 test("la pestana de Marca y el sidebar solo muestran long form con la bandera", () => {
