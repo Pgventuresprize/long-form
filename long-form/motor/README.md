@@ -26,8 +26,36 @@ Studio  ── lf_encolar(etapa) + POST /despertar ──►  motor  ── vac�
 
 ## Etapas
 
-`ingesta → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen con el largo: se
-renderizan desde Difusión, solo los aprobados (fase 6).
+`ingesta → clasificar → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen con el
+largo: se renderizan desde Difusión, solo los aprobados (fase 6).
+
+## Tipos de grabación
+
+`clasificar` decide el tipo con señales medidas y deja la evidencia en `estado.clasificacion` (y en
+`lf_proyectos.tipo` y `evidencia`). Claude con visión solo desempata, entre los tipos que dejan las reglas. La
+persona puede corregir el tipo en la revisión de quién es quién (`spec.tipo_forzado`).
+
+| Tipo | Cómo se reconoce | Cómo se edita | Código |
+|---|---|---|---|
+| Videollamada en galería | el borde celeste de Meet | quien habla en grande, láminas del PDF en el panel | `etapas/meet.py` |
+| Varias cámaras a la vez | dos o más videos que suenan a la vez y muestran caras | cambia de cámara según quién habla | `etapas/camaras.py` |
+| Una cámara | caras, sin cortes de edición | reencuadre por caras; sigue a quien habla por la boca | `etapas/una_camara.py` |
+| Pódcast o video ya editado | dos o más cambios de plano por minuto | respeta sus cortes: solo silencios largos, gráficos y audio | `etapas/una_camara.py` |
+| Charla con diapositivas | el PDF coincide con lo que se ve | lámina original en el escenario, persona en recuadro | `etapas/contenido.py` |
+| Grabación de pantalla | imagen plana, sin caras | acercamiento a la zona donde pasa algo | `etapas/contenido.py` |
+
+Antes de clasificar, los videos que no suenan a la vez se unen en orden como **partes sucesivas** (por fecha o
+por nombre; varias cámaras por partes se unen cada una con las suyas).
+
+Para todos los tipos (`tipos.py`):
+- Un audio aparte reemplaza al de cámara, sincronizado por correlación.
+- Color igualado entre cámaras, medido en la cara.
+- Reducción de ruido suave: `hqdn3d` en el video de cámara, nunca en pantallas, y `afftdn` en el audio salvo en
+  un video ya editado.
+- Corte J: en cámaras y una cámara, el audio de la toma nueva entra 4 cuadros antes que su imagen.
+
+Cada tipo responde las mismas preguntas en `tipos.py` (análisis, audio del programa, reparto, tomas, quién habla,
+compositor): las etapas no ramifican por tipo.
 
 Cada etapa deja en `lf_eventos` su duración y su costo:
 - segundos;
@@ -86,5 +114,10 @@ Después, en Vercel: `LF_MOTOR=modal`, `LF_MOTOR_URL=<url de despertar>` y `LF_M
 ## Pruebas
 
 - **`tests/prueba_plantillas.py`:** compara el HTML de Python y de TypeScript.
+- **`tests/prueba_tipos.py`:** las reglas de los tipos sin video (decisión, partes, corte J, color, encuadres).
+- **`tests/prueba_tipos_video.py`:** una prueba por tipo con video y sin base ni Claude. `clasificar` comprueba
+  que reconozca cada tipo; `todo` lo lleva hasta el control de calidad. Las muestras las arma
+  `tests/armar_muestras.py` con recortes de grabaciones reales (las rutas van por variables de entorno) y dos
+  videos generados (láminas y pantalla).
 - **`scripts/longform-cola.test.ts`:** prueba la cola contra el Supabase local.
 - **De punta a punta:** con `scripts/longform-proyecto-prueba.ts` y el motor corriendo.

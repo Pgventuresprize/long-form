@@ -7,6 +7,7 @@ import { estiloDe } from "@/engine/long-form/estilo-datos"
 import { avisar, avisosDe, BUCKET, marcarLeidos, proyectoDe, urlsFirmadas, type Aviso, type Proyecto } from "@/engine/long-form/datos"
 import { encolarEtapa } from "@/engine/long-form/motor"
 import { specDesdeEstilo } from "@/engine/long-form/proyectos"
+import { TIPOS_GRABACION } from "@/engine/long-form/tipos"
 import { supabaseAdmin } from "@/engine/supabase-admin"
 import { cuentaActual } from "@/lib/accounts"
 import { idDeCuentaCon } from "@/lib/funciones"
@@ -74,11 +75,10 @@ export async function crearProyecto(datos: {
     const spec = specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name })
 
     const db = supabaseAdmin()
-    // El tipo de grabacion lo decide la etapa clasificar; mientras, dos o mas videos son camaras y uno, videollamada.
-    const videos = tipos.filter((t) => t === "fuente").length
+    // El tipo de grabacion lo decide la etapa clasificar del motor: hasta entonces queda nulo.
     const { data: p, error } = await db
       .from("lf_proyectos")
-      .insert({ account_id: accountId, titulo, esfuerzo: datos.esfuerzo, notas: datos.notas.slice(0, 4000), cta_defecto: datos.ctaDefecto, tipo: videos >= 2 ? "camaras" : "meet", spec, tablero: "subiendo", fase: "subiendo", creado_por: yo?.id ?? null })
+      .insert({ account_id: accountId, titulo, esfuerzo: datos.esfuerzo, notas: datos.notas.slice(0, 4000), cta_defecto: datos.ctaDefecto, tipo: null, spec, tablero: "subiendo", fase: "subiendo", creado_por: yo?.id ?? null })
       .select("id")
       .single()
     if (error || !p) return { ok: false, error: `No se pudo crear: ${error?.message ?? "sin respuesta"}` }
@@ -200,6 +200,32 @@ export async function aprobarGuion(id: string, guion: Record<string, unknown>): 
 }
 
 /** Corregir: vuelve al guion desde lo aprobado. El render siguiente sale como version nueva. */
+/**
+ * La persona corrige el tipo de grabacion que eligio `clasificar`: queda fijo (spec.tipo_forzado) y el video se
+ * vuelve a analizar desde ahi. Solo mientras revisa quien es quien, o si el proceso fallo (un tipo equivocado
+ * puede hacer fallar el analisis). Lo ya subido no se toca.
+ */
+export async function cambiarTipo(id: string, tipo: string): Promise<Hecho> {
+  try {
+    const { p } = await proyectoPropio(id)
+    if (!TIPOS_GRABACION.includes(tipo as (typeof TIPOS_GRABACION)[number])) return { ok: false, error: "Ese tipo de grabación no existe." }
+    if (p.fase !== "revision_reparto" && p.tablero !== "error") return { ok: false, error: "El tipo se cambia al revisar quién es quién." }
+    if (!p.estado.clasificacion) return { ok: false, error: "Espera a que Studio reconozca el tipo." }
+    if (tipo === p.tipo) return { ok: true }
+    const db = supabaseAdmin()
+    const { error } = await db
+      .from("lf_proyectos")
+      .update({ spec: { ...p.spec, tipo_forzado: tipo }, tipo, tablero: "procesando", fase: "en_cola", detalle: "analisis" })
+      .eq("id", id)
+    if (error) return { ok: false, error: `No se pudo cambiar: ${error.message}` }
+    await encolarEtapa(id, "analisis")
+    revalidatePath(`/long-form/${id}`)
+    return { ok: true }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
 export async function corregir(id: string): Promise<Hecho> {
   try {
     const { p } = await proyectoPropio(id)

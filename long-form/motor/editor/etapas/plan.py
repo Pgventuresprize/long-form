@@ -13,43 +13,26 @@ def personas_aprobadas(ctx):
     return rep, [p for p in rep['personas'] if p.get('nombre')]
 
 
-def nombrar_segmentos(ctx, segs, rep, tomas=None):
-    """Cada segmento con el nombre de quien habla (camaras: por micro; meet: por la toma)."""
-    por_id = {p['id']: p for p in rep['personas']}
-    if ctx.tipo == 'camaras':
-        for s in segs:
-            p = por_id.get(s.get('hablante'))
-            s['quien'] = p['nombre'] if p and p.get('nombre') else None
-    else:
-        for s in segs:
-            mid = (s['inicio'] + s['fin']) / 2
-            t = next((t for t in tomas if t['a'] <= mid < t['b']), None)
-            s['quien'] = t.get('n') if t else None
-    return segs
-
-
 def correr(ctx):
+    from .. import tipos
+    tipo = tipos.de(ctx)
     rep, personas = personas_aprobadas(ctx)
     segs = ctx.json_trabajo('transcripcion.json')
     ctx.avance('Armando las tomas', .05)
-    if ctx.tipo == 'camaras':
-        from . import camaras
-        tomas = camaras.edl(ctx, rep)
-        wav = ctx.tj('programa16.wav')
-        fin = ctx.estado['analisis']['fin'] - ctx.estado['analisis']['inicio']
-    else:
-        from . import meet
-        tomas = meet.tomas(ctx, rep)
-        wav = ctx.tj('a16_A.wav')
-        fin = tomas[-1]['b']
-    segs = nombrar_segmentos(ctx, segs, rep, tomas)
+    tomas = tipo.tomas(ctx, rep)
+    wav = tipos.programa(ctx, 16000)
+    fin = tipo.fin(ctx, tomas)
+    segs = tipo.quien(ctx, segs, rep, tomas)
     ctx.json_trabajo('transcripcion.json', segs)
     if not ctx.reconstruyendo:
         ctx.guardar('tomas', tomas)
+        # los planos ajustados de una pasada anterior (quiza de otro tipo) ya no valen
+        ctx.guardar('tomas_render', None)
 
     ctx.avance('Midiendo silencios', .2)
     k = ctx.opcion('silencio_k', 0.35)
-    cortes_sil, info = silencios.pausas(wav, k, ctx.opcion('silencio_min', 0.6), ctx.opcion('silencio_aire', 0.18))
+    minimo = tipo.silencio_min or ctx.opcion('silencio_min', 0.6)
+    cortes_sil, info = silencios.pausas(wav, k, minimo, ctx.opcion('silencio_aire', 0.18))
     keep = silencios.conservar(fin, cortes_sil, ctx.FPS)
     mapa = Mapa(keep, ctx.FPS, INTRO)
     ctx.json_trabajo('silencios.json', cortes_sil)

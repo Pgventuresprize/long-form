@@ -1,22 +1,18 @@
 """Etapa 1 · Ingesta: trae los archivos, los mide y saca lo que las demas etapas analizan.
 
-Nunca se toca el original: todo sale a la carpeta de trabajo.
-- Audio a 16 kHz mono (sincronia, quien habla, transcripcion) y a 48 kHz (la mezcla final).
-- Meet: cuadros clave cada 2 s a 1440 de ancho (borde de quien habla, laminas, pantalla compartida).
+Nunca se toca el original: todo sale a la carpeta de trabajo. Todavia no se sabe el tipo de grabacion (lo
+decide `clasificar`), asi que aqui no se hace nada que dependa de el.
+- Audio a 16 kHz mono (sincronia, quien habla, transcripcion) y a 48 kHz (la mezcla final), por fuente.
+- Audio aparte (si se subio): igual, con la clave 'S'. Reemplaza al de camara en el programa.
 - PDF: cada lamina a PNG; en pantalla se usa la lamina original, no la captura, para que se lea perfecta.
 """
 from .. import ffm
-
-KF_PASO = 2.0
-KF_ANCHO = 1440
 
 
 def correr(ctx):
     fuentes = ctx.archivos('fuente')
     if not fuentes:
         raise RuntimeError('El proyecto no tiene videos de entrada')
-    if ctx.tipo == 'camaras' and len(fuentes) < 2:
-        raise RuntimeError('Cámaras separadas necesita al menos dos videos (uno por cámara)')
     info = []
     for i, f in enumerate(fuentes):
         ctx.avance(f'Trayendo {f.get("nombre", "video")}', i / max(len(fuentes), 1) * .4)
@@ -24,30 +20,27 @@ def correr(ctx):
         m = ffm.sondear(ruta)
         if not m['video']:
             raise RuntimeError(f'{f.get("nombre")} no tiene pista de video')
-        if not m['audio']:
-            raise RuntimeError(f'{f.get("nombre")} no tiene audio: sin audio no se puede saber quién habla')
         clave = f.get('rol') or 'ABCDEFGH'[i]
-        ffm.extraer_audio(ruta, ctx.tj(f'a16_{clave}.wav'), 16000, 1)
-        ffm.extraer_audio(ruta, ctx.tj(f'a48_{clave}.wav'), 48000, 1)
+        if m['audio']:
+            ffm.extraer_audio(ruta, ctx.tj(f'a16_{clave}.wav'), 16000, 1)
+            ffm.extraer_audio(ruta, ctx.tj(f'a48_{clave}.wav'), 48000, 1)
         vfr = abs(m['fps'] - m['fps_nominal']) > 0.5 if m['fps_nominal'] else False
         info.append({'clave': clave, 'archivo': str(ruta), 'nombre': f.get('nombre'), 'persona': f.get('persona'), **m, 'vfr': vfr})
         ctx.log(f'{clave}: {m["ancho"]}x{m["alto"]} · {m["fps"]:.2f} fps{" variables" if vfr else ""} · '
-                f'{m["duracion"] / 60:.1f} min · rotación {m["rotacion"]}')
-        if m['rotacion'] and abs(m['rotacion']) % 180 == 90:
-            ctx.aviso(f'El video {clave} se grabó en vertical (rotado {m["rotacion"]}°): revisa el encuadre de sus planos.')
+                f'{m["duracion"] / 60:.1f} min · rotación {m["rotacion"]}{"" if m["audio"] else " · sin audio"}')
 
-    if ctx.tipo == 'meet':
-        f = info[0]
-        kf = ctx.tj('kf')
-        kf.mkdir(exist_ok=True)
-        if not any(kf.glob('*.jpg')):
-            ctx.avance('Sacando cuadros clave cada 2 s', .5)
-            ancho = min(KF_ANCHO, f['ancho'])
-            ffm.correr(['-i', f['archivo'], '-vf', f'fps={1 / KF_PASO},scale={ancho}:-2:flags=area', '-q:v', '3',
-                        str(kf / '%05d.jpg')])
-        n = len(list(kf.glob('*.jpg')))
-        f['kf'] = {'paso': KF_PASO, 'n': n, 'escala': f['ancho'] / min(KF_ANCHO, f['ancho'])}
-        ctx.log(f'{n} cuadros clave')
+    aparte = None
+    audios = ctx.archivos('audio')
+    if audios:
+        ruta = ctx.local(audios[0])
+        ffm.extraer_audio(ruta, ctx.tj('a16_S.wav'), 16000, 1)
+        ffm.extraer_audio(ruta, ctx.tj('a48_S.wav'), 48000, 1)
+        aparte = 'S'
+        ctx.log(f'audio aparte: {audios[0].get("nombre")}')
+        if len(audios) > 1:
+            ctx.aviso('Se subió más de un audio aparte: se usa el primero.')
+    if not aparte and not any(f['audio'] for f in info):
+        raise RuntimeError('Ningún video tiene audio y no se subió un audio aparte: sin audio no se puede saber quién habla')
 
     pdfs = ctx.archivos('pdf')
     laminas = []
@@ -67,7 +60,7 @@ def correr(ctx):
     for a in ctx.archivos('ilustracion') + ctx.archivos('foto') + ctx.archivos('musica'):
         ctx.local(a)
 
-    ctx.guardar('ingesta', {'fuentes': info, 'laminas': len(laminas)})
+    ctx.guardar('ingesta', {'fuentes': info, 'laminas': len(laminas), 'audio_aparte': aparte})
     if not ctx.reconstruyendo:
         # La miniatura del tablero y la duracion: un cuadro de la primera fuente.
         f = info[0]

@@ -16,6 +16,7 @@ import subprocess
 import numpy as np
 
 from . import config
+from . import tipos
 
 # sube VERSION cuando cambie el algoritmo: la firma de los trozos del render depende de ella
 VERSION = 'limpieza-v2'
@@ -216,7 +217,7 @@ def correr(ctx, tomas):
     """Una pista limpia por cada tramo continuo con pildora sobre el mismo recuadro."""
     import hashlib
     import json
-    info = ctx.estado['ingesta']['fuentes'][0]
+    info = tipos.fuentes(ctx)[0]
     dpr = 2 if info['ancho'] >= 2560 else 1
     grupos = []
     for s in tomas:

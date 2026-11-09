@@ -19,6 +19,7 @@ import numpy as np
 
 from .. import config, ffm
 from ..contexto import Mapa
+from .. import tipos
 
 GRADO = 'eq=contrast=1.04:saturation=1.06'
 
@@ -29,11 +30,16 @@ class CompositorCamaras:
         self.ctx = ctx
         an = ctx.estado['analisis']
         self.an = an
-        self.fuentes = {f['clave']: f for f in ctx.estado['ingesta']['fuentes']}
+        self.fuentes = {f['clave']: f for f in tipos.fuentes(ctx)}
         self.claves = an['claves']
 
     def firma(self, toma):
-        return [toma['plano'], self.an['offsets'], self.an['encuadres']]
+        return [toma['plano'], self.an['offsets'], self.an['encuadres'], self.an.get('color'), 'r1']
+
+    def _arreglo(self, k):
+        """Color igualado a la maestra y ruido suave, antes de recortar."""
+        from .. import tipos
+        return f'{tipos.filtro_color((self.an.get("color") or {}).get(k))}{tipos.RUIDO}'
 
     def entradas(self, toma, t, n):
         """(args de entrada, grafo, etiqueta de salida). t: segundo del programa."""
@@ -49,8 +55,8 @@ class CompositorCamaras:
             ea, eb = self.an['encuadres'][A]['mitad'], self.an['encuadres'][B]['mitad']
             args = ['-ss', f'{src(A):.4f}', '-t', f'{dur:.3f}', '-i', self.fuentes[A]['archivo'],
                     '-ss', f'{src(B):.4f}', '-t', f'{dur:.3f}', '-i', self.fuentes[B]['archivo']]
-            g = (f'[0:v]fps={FPS},setpts=PTS-STARTPTS,crop={ea[0]}:{ea[1]}:{ea[2]}:{ea[3]},scale={hw}:{H}:flags=lanczos,setsar=1[ha];'
-                 f'[1:v]fps={FPS},setpts=PTS-STARTPTS,crop={eb[0]}:{eb[1]}:{eb[2]}:{eb[3]},scale={hw}:{H}:flags=lanczos,setsar=1[hb];'
+            g = (f'[0:v]setpts=PTS-STARTPTS,fps={FPS},{self._arreglo(A)}crop={ea[0]}:{ea[1]}:{ea[2]}:{ea[3]},scale={hw}:{H}:flags=lanczos,setsar=1[ha];'
+                 f'[1:v]setpts=PTS-STARTPTS,fps={FPS},{self._arreglo(B)}crop={eb[0]}:{eb[1]}:{eb[2]}:{eb[3]},scale={hw}:{H}:flags=lanczos,setsar=1[hb];'
                  f'color=c=black:s={W}x{H}:r={FPS}[neg];[neg][ha]overlay=0:0:shortest=1[n1];[n1][hb]overlay={W - hw}:0:shortest=1,{GRADO}[base]')
             return args, g, '[base]', 2
         k, tipo = pl[0], pl[1]
@@ -62,11 +68,29 @@ class CompositorCamaras:
             v = f'crop={cw}:{ch}:{x}:{y},scale={W}:{H}:flags=lanczos'
         else:
             v = f'scale={W}:{H}:force_original_aspect_ratio=decrease:flags=lanczos,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2'
-        return args, f'[0:v]fps={FPS},setpts=PTS-STARTPTS,{v},{GRADO},setsar=1[base]', '[base]', 1
+        return args, f'[0:v]setpts=PTS-STARTPTS,fps={FPS},{self._arreglo(k)}{v},{GRADO},setsar=1[base]', '[base]', 1
 
 
 # ---------------------------------------------------------------- trozos
+# Ningun trozo pasa de 20 s: se reparten mejor entre los hilos y, si una fuente tiene un punto dañado, se pierde
+# poco al rehacer.
+MAX_TROZO = 600
+
+
 def trozos(keep, mapa, tomas, piezas, bordes_extra=()):
+    return [x for c in _trozos(keep, mapa, tomas, piezas, bordes_extra) for x in _partir(c, mapa.fps)]
+
+
+def _partir(c, fps):
+    ox, oy, t = c
+    if oy - ox <= MAX_TROZO:
+        return [c]
+    n = -(-(oy - ox) // MAX_TROZO)
+    cortes = [ox + round((oy - ox) * i / n) for i in range(n + 1)]
+    return [(u, v, t + (u - ox) / fps) for u, v in zip(cortes, cortes[1:])]
+
+
+def _trozos(keep, mapa, tomas, piezas, bordes_extra=()):
     bordes = sorted({t['a'] for t in tomas} | set(bordes_extra))
     lista = []
     for k, (a, b) in enumerate(keep):
@@ -98,7 +122,9 @@ def render_trozo(ctx, comp, c, piezas, tomas, carpeta, extra_firma=None):
     W, H, FPS = ctx.W, ctx.H, ctx.FPS
     s = toma_de(tomas, t + 0.01)
     act = sorted([p for p in piezas if p['o0'] < oy and p['o1'] > ox], key=lambda p: p['capa'])
-    firma = json.dumps([round(t, 3), n, W, H, s, comp.firma(s), [(p['pieza'], p['o0']) for p in act], extra_firma],
+    # 't4': trozos hechos sin reiniciar filtros y con el final rellenado (ver abajo); cambia la firma para no
+    # reusar los de antes
+    firma = json.dumps(['t4', round(t, 3), n, W, H, s, comp.firma(s), [(p['pieza'], p['o0']) for p in act], extra_firma],
                        sort_keys=True, ensure_ascii=False, default=str)
     out = carpeta / (hashlib.md5(firma.encode()).hexdigest()[:16] + '.mp4')
     if out.exists() and out.stat().st_size > 1000:
@@ -111,9 +137,20 @@ def render_trozo(ctx, comp, c, piezas, tomas, carpeta, extra_firma=None):
         fc.append(f'{base}[o{k}]overlay={p.get("dx", 0)}:{p.get("dy", 0)}:eof_action=pass:format=auto[v{k}]')
         base = f'[v{k}]'
         idx += 1
-    fc.append(f'{base}scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[fin]')
+    # al final de una fuente puede faltar un cuadro o dos (el archivo termina una fraccion antes): se repite el
+    # ultimo, hasta medio segundo. Mas que eso es una falta de verdad y la detecta la cuenta de abajo.
+    fc.append(f'{base}tpad=stop_mode=clone:stop=15,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[fin]')
     tmp = out.with_suffix('.tmp.mp4')
+    # Un video exportado de un editor puede cambiar de formato a mitad (tamaño, color): ffmpeg reiniciaria los
+    # filtros ahi, los tiempos volverian a cero y se perderian cuadros. Se le pide que no los reinicie.
+    args = [y for x in args for y in ((['-reinit_filter', '0', x]) if x == '-i' else [x])]
     ffm.correr(args + ['-filter_complex', ';'.join(fc), '-map', '[fin]', '-frames:v', str(n)] + ffm.ENC + [tmp])
+    # un trozo corto descuadra todo lo que viene despues (graficos y audio): se detiene aqui con el motivo
+    hechos = ffm.cuadros_de(tmp)
+    if hechos != n:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f'Un trozo del video salió con {hechos} de {n} cuadros (segundo {t:.1f} de la grabación): '
+                           'la fuente puede tener los tiempos dañados en ese punto')
     tmp.replace(out)
     return out
 
@@ -127,10 +164,13 @@ def tarjeta_clip(ctx, png, dur, out, fo):
 
 
 # ---------------------------------------------------------------- audio
-def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro):
+def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=True):
     sr = 48000
     tmp = ctx.tj('render') / 'programa_tratado.wav'
-    ffm.extraer_audio(wav_programa, tmp, sr, 2, 'highpass=f=80,acompressor=threshold=-20dB:ratio=3:attack=10:release=200:makeup=2,'
+    # Ruido suave (afftdn a 8 dB): baja el zumbido de sala sin el sonido "bajo el agua". Un video ya editado
+    # trae su propia mezcla y no se toca.
+    ruido = 'afftdn=nr=8:nf=-40,' if reducir_ruido else ''
+    ffm.extraer_audio(wav_programa, tmp, sr, 2, f'highpass=f=80,{ruido}acompressor=threshold=-20dB:ratio=3:attack=10:release=200:makeup=2,'
                                                'loudnorm=I=-16:TP=-1.5:LRA=11')
     _, prog = ffm.leer_wav(tmp)
     prog = np.asarray(prog)
@@ -206,10 +246,8 @@ def nombre_salida(ctx, version):
 
 
 def compositor(ctx):
-    if ctx.tipo == 'camaras':
-        return CompositorCamaras(ctx)
-    from .meet import CompositorMeet
-    return CompositorMeet(ctx)
+    from .. import tipos
+    return tipos.de(ctx).compositor(ctx)
 
 
 def correr(ctx):
@@ -250,8 +288,8 @@ def correr(ctx):
     vid = carpeta / 'video.mp4'
     ffm.concatenar([ini] + salidas + [fin], vid)
     ctx.avance('Mezclando audio', .93)
-    wav_prog = ctx.tj('programa48.wav') if ctx.tipo == 'camaras' else ctx.tj('a48_A.wav')
-    wav = audio(ctx, keep, mapa, piezas, wav_prog, intro, outro)
+    from .. import tipos
+    wav = audio(ctx, keep, mapa, piezas, tipos.programa(ctx, 48000), intro, outro, tipos.de(ctx).reduce_ruido_audio)
     version = int(ctx.estado.get('render', {}).get('version', 0)) + 1
     nombre = nombre_salida(ctx, version)
     salida = ctx.salida / nombre

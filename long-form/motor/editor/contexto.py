@@ -34,7 +34,10 @@ class Contexto:
 
     @property
     def tipo(self):
-        return self.spec['tipo']           # 'camaras' | 'meet' (los demas tipos llegan con la etapa clasificar)
+        """El que eligio la persona al corregir la clasificacion, si no el que decidio `clasificar`, si no el
+        del proyecto (pruebas locales). Ver tipos.py."""
+        return (self.spec.get('tipo_forzado') or (self.estado.get('clasificacion') or {}).get('tipo')
+                or self.spec.get('tipo'))
 
     @property
     def esfuerzo(self):
@@ -43,7 +46,8 @@ class Contexto:
     # ---- estado
     def guardar(self, clave, valor):
         self.estado[clave] = valor
-        if self.reconstruyendo and clave in ('reparto', 'guion', 'clips', 'render', 'qa', 'graficos', 'keep', 'tomas_render'):
+        if self.reconstruyendo and clave in ('reparto', 'guion', 'clips', 'render', 'qa', 'graficos', 'keep', 'tomas_render',
+                                             'clasificacion', 'tomas'):
             return      # la reconstruccion solo rehace archivos de trabajo; el estado ya existe
         self.alm.guardar(self.pid, clave, valor)
 

@@ -1,13 +1,13 @@
-﻿"""Etapa 2 (grabaciÃ³n de Meet) Â· QuiÃ©n habla, quÃ© se proyecta y propuesta de reparto.
+"""Etapa 2 (grabación de Meet) · Quién habla, qué se proyecta y propuesta de reparto.
 
 Portado de scan.py, tramos.py, slides.py, share.py, tomas.py y layers.py del taller de Plogy Studio.
 
 En una grabacion de pantalla de Meet no hay camaras separadas: todo esta dentro de la interfaz. El talk show
 se reconstruye recortando y recomponiendo:
-- QuiÃ©n habla: el borde celeste (#A8C7FA aprox.) con que Meet resalta a quien habla. Las detecciones
+- Quién habla: el borde celeste (#A8C7FA aprox.) con que Meet resalta a quien habla. Las detecciones
   seguidas del mismo recuadro forman tramos; los nombres se leen de la etiqueta de Meet (Claude con vision)
   y una persona los confirma en la aprobacion 1, junto con las voces que hablan sin camara.
-- QuÃ© se proyecta: la lamina del PDF (se reconoce por comparacion de plantillas a varias escalas y en
+- Qué se proyecta: la lamina del PDF (se reconoce por comparacion de plantillas a varias escalas y en
   pantalla va la imagen ORIGINAL del PDF, no la captura) o la pantalla compartida (el rectangulo que no es
   fondo de Meet), o nada (galeria). Las fases se proponen solas y se confirman en la aprobacion 1.
 """
@@ -16,6 +16,7 @@ import json
 import numpy as np
 
 from .. import ia
+from .. import tipos
 
 AZUL_MAX_ANCHO = 0.40      # un recuadro de persona nunca es mas ancho que esto (fraccion del cuadro clave)
 UMBRAL_LAMINA = 0.7       # coincidencias reales: 0,78 a 0,98; la galeria da falsos de hasta 0,67
@@ -79,14 +80,16 @@ class Laminas:
         self.paginas = [cv2.imread(str(p), 0) for p in rutas]
         h0, w0 = self.paginas[0].shape
         self.ar = h0 / w0
-        self.anchos = list(range(140, 470, 10))      # ancho de la lamina en un cuadro reducido a 480
+        # ancho de la lamina en un cuadro reducido a 480: hasta el cuadro entero (una proyeccion grabada de frente
+        # o una charla con la lamina a pantalla completa; en Meet nunca pasa de ~460)
+        self.anchos = list(range(140, 490, 10))
         self.tpl = {w: [cv2.resize(p, (w, round(w * self.ar)), interpolation=cv2.INTER_AREA) for p in self.paginas]
                     for w in self.anchos}
         self.cur = None
 
     def _score(self, fr, pag, w):
         t = self.tpl[w][pag]
-        if t.std() < 2 or t.shape[0] >= fr.shape[0] or t.shape[1] >= fr.shape[1]:
+        if t.std() < 2 or t.shape[0] > fr.shape[0] or t.shape[1] > fr.shape[1]:
             return -1, None
         r = self.cv2.matchTemplate(fr, t, self.cv2.TM_CCOEFF_NORMED)
         _, v, _, loc = self.cv2.minMaxLoc(r)
@@ -179,7 +182,7 @@ def refina(im, b):
 
 
 def fases(esc, paso):
-    """F galeria Â· S lamina del PDF Â· C pantalla compartida; suavizado y tramos de al menos 6 s."""
+    """F galeria · S lamina del PDF · C pantalla compartida; suavizado y tramos de al menos 6 s."""
     cod = []
     for o in esc:
         if o['pag']:
@@ -213,7 +216,7 @@ def fases(esc, paso):
 
 
 def presets_compartido(esc, escala):
-    """Los rectangulos de pantalla compartida se agrupan en pocos tamaÃ±os fijos: el encuadre no tiembla."""
+    """Los rectangulos de pantalla compartida se agrupan en pocos tamaños fijos: el encuadre no tiembla."""
     rs = [o['share'] for o in esc if o['share'] and not o['pag']]
     grupos = []
     for r in rs:
@@ -228,9 +231,35 @@ def presets_compartido(esc, escala):
 
 
 # ---------------------------------------------------------------- analisis (etapa 2)
+KF_PASO = 2.0
+KF_ANCHO = 1440
+
+
+def cuadros_clave(ctx, info):
+    """Un cuadro cada 2 s a 1440 de ancho (borde de quien habla, laminas, pantalla compartida). Aqui se decodifica
+    todo, no solo los cuadros clave: el resto del analisis cuenta con un cuadro cada 2 s exactos."""
+    from .. import ffm
+    kf = ctx.tj('kf')
+    kf.mkdir(exist_ok=True)
+    if not any(kf.glob('*.jpg')):
+        ctx.avance('Sacando cuadros clave cada 2 s', .02)
+        ancho = min(KF_ANCHO, info['ancho'])
+        ffm.correr(['-i', info['archivo'], '-vf', f'fps={1 / KF_PASO},scale={ancho}:-2:flags=area', '-q:v', '3',
+                    str(kf / '%05d.jpg')])
+    n = len(list(kf.glob('*.jpg')))
+    info['kf'] = {'paso': KF_PASO, 'n': n, 'escala': info['ancho'] / min(KF_ANCHO, info['ancho'])}
+    ctx.log(f'{n} cuadros clave')
+    return info
+
+
 def correr(ctx):
     import cv2
-    info = ctx.estado['ingesta']['fuentes'][0]
+
+    from .. import tipos
+    info = cuadros_clave(ctx, dict(tipos.fuentes(ctx)[0]))
+    if not info.get('audio') and not tipos.audio_aparte(ctx):
+        raise RuntimeError('La grabación de Meet no tiene audio')
+    tipos.escribir_programa(ctx, info['clave'], 0.0, info['duracion'])
     esc = escanear(ctx, info)
     ctx.json_trabajo('escaneo.json', esc)
     paso = info['kf']['paso']
@@ -249,10 +278,11 @@ def correr(ctx):
             f"; {len(pres)} encuadres de pantalla compartida")
     sin = sum(1 for o in esc if not o['caja']) / max(len(esc), 1)
     if sin > 0.4:
-        ctx.aviso(f'En el {sin:.0%} de la grabaciÃ³n no se ve el borde de quien habla: puede que tenga la cÃ¡mara '
-                  'apagada o que la vista de Meet no lo muestre. Revisa las voces sin cÃ¡mara.')
+        ctx.aviso(f'En el {sin:.0%} de la grabación no se ve el borde de quien habla: puede que tenga la cámara '
+                  'apagada o que la vista de Meet no lo muestre. Revisa las voces sin cámara.')
     ctx.guardar('analisis', {'tramos': tr, 'fases': fz, 'presets': pres, 'paso': paso,
-                             'escala': info['kf']['escala'], 'ancho': info['ancho'], 'alto': info['alto']})
+                             'escala': info['kf']['escala'], 'ancho': info['ancho'], 'alto': info['alto'],
+                             'inicio': 0.0, 'fin': info['duracion']})
 
 
 # ---------------------------------------------------------------- propuesta de reparto (fin de la transcripcion)
@@ -269,7 +299,7 @@ def _miniatura(ctx, t, caja, nombre, ancho=320):
 
 
 def _grupos(tr):
-    """Tramos con el mismo recuadro (posicion y tamaÃ±o parecidos) son, casi siempre, la misma persona."""
+    """Tramos con el mismo recuadro (posicion y tamaño parecidos) son, casi siempre, la misma persona."""
     grupos = []
     for i, t in enumerate(tr):
         for g in grupos:
@@ -286,7 +316,7 @@ def _nombres_por_vision(ctx, tr, grupos):
     import cv2
     an = ctx.estado['analisis']
     bloques = [{'type': 'text', 'text': 'Cada imagen es el recuadro de una persona en Google Meet. Lee el nombre de la '
-                                        'etiqueta (abajo a la izquierda). Si no se lee, deja el nombre vacÃ­o.'}]
+                                        'etiqueta (abajo a la izquierda). Si no se lee, deja el nombre vacío.'}]
     for gi, g in enumerate(grupos):
         t = tr[g['tramos'][0]]
         n = int((t['t0'] + t['t1']) / 2 / an['paso'])
@@ -316,7 +346,7 @@ def propuesta_reparto(ctx, segs):
     def norm(x):
         import unicodedata
         x = unicodedata.normalize('NFKD', x or '').encode('ascii', 'ignore').decode().lower()
-        return ' '.join(x.replace('â€¦', ' ').replace('...', ' ').split())
+        return ' '.join(x.replace('…', ' ').replace('...', ' ').split())
     candidatos = [(norm(n), p) for p in ctx.spec.get('personas', []) for n in [p['nombre']] + p.get('alias', [])]
 
     def buscar(etiqueta):
@@ -324,7 +354,7 @@ def propuesta_reparto(ctx, segs):
         if not e:
             return None
         for n, p in candidatos:
-            # Meet corta los nombres largos con Â«...Â»: basta con que coincida el principio
+            # Meet corta los nombres largos con «...»: basta con que coincida el principio
             if e == n or (len(e) >= 8 and n.startswith(e)) or (len(n) >= 8 and e.startswith(n)):
                 return p
         return None
@@ -343,8 +373,8 @@ def propuesta_reparto(ctx, segs):
                                'origen': 'proyecto' if p else ('ia' if etiqueta else 'pendiente'),
                                'tramos': [], 'miniatura': _miniatura(ctx, (t['t0'] + t['t1']) / 2, t['caja'], f'persona_{pid}.jpg')}
             if etiqueta and not p:
-                personas[clave]['nota'] = (f'Meet dice Â«{etiqueta}Â». Si esa cuenta la usaba otra persona, '
-                                           'escribe su nombre real: el rÃ³tulo dirÃ¡ el nombre que pongas.')
+                personas[clave]['nota'] = (f'Meet dice «{etiqueta}». Si esa cuenta la usaba otra persona, '
+                                           'escribe su nombre real: el rótulo dirá el nombre que pongas.')
         personas[clave]['tramos'] += g['tramos']
     total = sum(t['t1'] - t['t0'] + an['paso'] for t in tr) or 1
     for p in personas.values():
@@ -365,7 +395,7 @@ def propuesta_reparto(ctx, segs):
     for v in voces:
         v['texto'] = v['texto'][:240]
     return {'tipo': 'meet', 'personas': list(personas.values()), 'voces': voces, 'fases': an['fases'],
-            'nota': 'Revisa nombres (quien usaba cada cuenta), las voces sin cÃ¡mara y las fases (galerÃ­a, lÃ¡mina, pantalla).'}
+            'nota': 'Revisa nombres (quien usaba cada cuenta), las voces sin cámara y las fases (galería, lámina, pantalla).'}
 
 
 # ---------------------------------------------------------------- tomas (tomas.py)
@@ -407,7 +437,7 @@ def _vertical(kfim, tile_kf):
 def tomas(ctx, rep):
     import cv2
     an = ctx.estado['analisis']
-    info = ctx.estado['ingesta']['fuentes'][0]
+    info = tipos.fuentes(ctx)[0]
     esc = ctx.json_trabajo('escaneo.json')
     paso_kf = an['paso']
     escala = an['escala']
@@ -542,10 +572,10 @@ def tomas(ctx, rep):
             limpio.append(s)
     from collections import Counter
     ctx.log(f'{len(limpio)} tomas; ' + ', '.join(f'{k} {v}' for k, v in Counter(s['n'] for s in limpio).items()) +
-            f"; con pÃ­ldora de Meet: {sum(1 for s in limpio if s.get('pill'))}")
+            f"; con píldora de Meet: {sum(1 for s in limpio if s.get('pill'))}")
     if any(s.get('pill') for s in limpio):
-        ctx.aviso('Hay tramos con la pÃ­ldora de Meet (botones que aparecen al pasar el cursor) sobre un recuadro: '
-                  'se limpia automÃ¡ticamente; revisa esos momentos a tamaÃ±o real.')
+        ctx.aviso('Hay tramos con la píldora de Meet (botones que aparecen al pasar el cursor) sobre un recuadro: '
+                  'se limpia automáticamente; revisa esos momentos a tamaño real.')
     return limpio
 
 
@@ -657,7 +687,7 @@ class Escenario:
         d = ImageDraw.Draw(img, 'RGBA')
         k = self.k
         f1, f0 = self.fuente(21), self.fuente(13)
-        d.text((self.COL_X, y0), self.m.texto('en_esta_sesion', 'En esta sesiÃ³n').upper(), font=f0, fill=(201, 191, 182, 200))
+        d.text((self.COL_X, y0), self.m.texto('en_esta_sesion', 'En esta sesión').upper(), font=f0, fill=(201, 191, 182, 200))
         y = y0 + int(32 * k)
         alto_disp = self.H - int(90 * k) - y
         paso = min(int(44 * k), max(int(26 * k), alto_disp // max(len(self.caps), 1)))
@@ -720,7 +750,7 @@ class Escenario:
         return (P[0] + (P[2] - vw) // 2, P[1] + (P[3] - vh) // 2, vw, vh)
 
     def capa(self, modo, ventana=None, tarjeta=None, nombre='', rol='', lamina=None, cap=0, voz=False, foto=None):
-        """modo 'P' panel + persona Â· 'F' persona grande. PNG con huecos transparentes (escritura atomica)."""
+        """modo 'P' panel + persona · 'F' persona grande. PNG con huecos transparentes (escritura atomica)."""
         import hashlib
         import os
 
@@ -776,7 +806,7 @@ class CompositorMeet:
         self.ctx = ctx
         g = ctx.aprobado('guion') or {}
         self.esc = Escenario(ctx, g.get('capitulos', []))
-        self.info = ctx.estado['ingesta']['fuentes'][0]
+        self.info = tipos.fuentes(ctx)[0]
         self.V = self.info['archivo']
         rep = ctx.aprobado('reparto')
         self.rol = {p['nombre']: p.get('rol', '') for p in rep['personas'] if p.get('nombre')}
@@ -833,7 +863,7 @@ class CompositorMeet:
         if usa_video:
             tt = cong if cong is not None else t
             args += ['-ss', f'{tt:.4f}', '-t', f'{(0.4 if cong is not None else n / FPS + 0.3):.3f}', '-i', self.V]
-            fuente = f'[0:v]fps={FPS},setpts=PTS-STARTPTS'
+            fuente = f'[0:v]setpts=PTS-STARTPTS,fps={FPS}'
             if cong is not None:
                 fuente += f',trim=end_frame=1,tpad=stop_mode=clone:stop={n + 2}'
             idx = 1
@@ -863,7 +893,7 @@ class CompositorMeet:
             e1 = e2
         if 'tile' in s and not s.get('voz'):
             if lim:
-                ent = f'[{lim_i}:v]fps={FPS},setpts=PTS-STARTPTS'
+                ent = f'[{lim_i}:v]setpts=PTS-STARTPTS,fps={FPS}'
                 if cong is not None:
                     ent += f',trim=end_frame=1,tpad=stop_mode=clone:stop={n + 2}'
                 g.append(f'{ent},{self.sin_interfaz(s)},{GRADO},scale={tar[2]}:{tar[3]}:flags=lanczos[tl]')

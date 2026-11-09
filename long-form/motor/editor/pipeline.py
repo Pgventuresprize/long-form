@@ -1,6 +1,6 @@
 """El recorrido de un proyecto: etapas, revisiones y que sigue despues de cada una.
 
-    ingesta -> analisis -> transcripcion ─┐
+    ingesta -> clasificar -> analisis -> transcripcion ─┐
                                           ▼
                               [revision 1: quien es quien]   segun el nivel
                                           │
@@ -25,7 +25,7 @@ import traceback
 from . import config, ia
 from .contexto import Contexto
 
-ORDEN = ['ingesta', 'analisis', 'transcripcion', 'plan', 'graficos', 'render', 'qa', 'clips']
+ORDEN = ['ingesta', 'clasificar', 'analisis', 'transcripcion', 'plan', 'graficos', 'render', 'qa', 'clips']
 COMPUERTAS = {'transcripcion': ('revision_reparto', 'reparto'), 'plan': ('revision_guion', 'guion')}
 # Los mismos nombres que muestra Studio (src/components/long-form/comun.tsx).
 NOMBRES = {'ingesta': 'Leyendo los archivos', 'analisis': 'Analizando quién habla', 'clasificar': 'Reconociendo el tipo de grabación',
@@ -40,10 +40,13 @@ AVISOS = {
 }
 
 
-def _modulo(etapa, tipo):
+def _correr(etapa, ctx):
+    """El analisis depende del tipo de grabacion (tipos.py); las demas etapas son las mismas para todos."""
+    if etapa == 'analisis':
+        from . import tipos
+        return tipos.de(ctx).analizar(ctx)
     import importlib
-    nombre = ('camaras' if tipo == 'camaras' else 'meet') if etapa == 'analisis' else etapa
-    return importlib.import_module(f'.etapas.{nombre}', __package__)
+    return importlib.import_module(f'.etapas.{etapa}', __package__).correr(ctx)
 
 
 def siguiente(etapa, ctx):
@@ -90,13 +93,13 @@ def reconstruir(alm, pid, etapa):
     if etapa not in ORDEN:
         return
     previas = ORDEN[:ORDEN.index(etapa)]
-    for p in [x for x in previas if x in ('ingesta', 'analisis', 'transcripcion', 'plan')]:
+    for p in [x for x in previas if x in ('ingesta', 'clasificar', 'analisis', 'transcripcion', 'plan')]:
         ctx = Contexto(alm, pid, p)
-        if (ctx.trabajo / f'.hecho_{p}').exists() or p not in ctx.estado:
+        if (ctx.trabajo / f'.hecho_{p}').exists() or (p if p != 'clasificar' else 'clasificacion') not in ctx.estado:
             continue
         ctx.reconstruyendo = True
         ctx.log(f'reconstruyendo {p} en este motor (la carpeta de trabajo no lo tenía)')
-        _modulo(p, ctx.tipo).correr(ctx)
+        _correr(p, ctx)
         (ctx.trabajo / f'.hecho_{p}').touch()
 
 
@@ -118,7 +121,7 @@ def correr_etapa(alm, pid, etapa, encadenar=True):
         ctx.avance('Empezando', 0)
         ctx.log(f'empieza {etapa}')
         try:
-            _modulo(etapa, ctx.tipo).correr(ctx)
+            _correr(etapa, ctx)
             (ctx.trabajo / f'.hecho_{etapa}').touch()
         except Exception as e:  # noqa: BLE001
             ctx.log(f'{type(e).__name__}: {e}\n{traceback.format_exc()[-3000:]}', 'error')

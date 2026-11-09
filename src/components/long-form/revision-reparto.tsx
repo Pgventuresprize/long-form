@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { Proyecto } from "@/engine/long-form/datos"
 
+import { TipoDeGrabacion } from "./tipo-grabacion"
+
 type Persona = {
   id: string
   tipo?: string
@@ -24,14 +26,13 @@ type Persona = {
   nota?: string
 }
 
-const TIPOS: Record<string, string> = {
-  meet: "Videollamada en galería",
-  camaras: "Varias cámaras a la vez",
-  partes: "Partes sucesivas de una grabación",
-  una_camara: "Una cámara",
-  podcast: "Pódcast o video ya editado",
-  charla: "Charla con diapositivas",
-  pantalla: "Grabación de pantalla",
+/** Como se llama cada tarjeta segun de donde salio la persona. */
+function etiqueta(x: Persona, i: number): string {
+  if (x.tipo === "tercero") return "Otra voz"
+  if (x.tipo === "camara") return `Cámara ${x.id}`
+  if (x.tipo === "ponente") return "Ponente"
+  if (x.tipo === "voz") return "Voz principal"
+  return `Persona ${i + 1}`
 }
 
 /**
@@ -52,11 +53,8 @@ export function RevisionReparto({ p, urls, alAprobar }: { p: Proyecto; urls: Rec
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1 rounded-xl border p-4">
-        <span className="text-muted-foreground text-xs">Tipo de grabación</span>
-        <span className="font-medium">{TIPOS[p.tipo ?? ""] ?? "Sin clasificar"}</span>
-        {typeof p.spec.evidencia_tipo === "string" ? <span className="text-muted-foreground text-xs">{p.spec.evidencia_tipo}</span> : null}
-      </div>
+      <TipoDeGrabacion p={p} alCambiar={alAprobar} />
+      {typeof reparto.nota === "string" ? <p className="text-muted-foreground text-sm">{reparto.nota}</p> : null}
 
       <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {personas.map((x, i) => {
@@ -67,14 +65,14 @@ export function RevisionReparto({ p, urls, alAprobar }: { p: Proyecto; urls: Rec
                 <div className="bg-muted flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg">
                   {foto ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={foto} alt={`Cámara ${x.id}`} className="h-full w-full object-cover" />
+                    <img src={foto} alt={etiqueta(x, i)} className="h-full w-full object-cover" />
                   ) : (
                     <UserIcon className="text-muted-foreground size-6" aria-hidden />
                   )}
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-medium">{x.tipo === "tercero" ? "Otra voz" : `Cámara ${x.id}`}</span>
+                    <span className="text-sm font-medium">{etiqueta(x, i)}</span>
                     {typeof x.voz === "number" ? <span className="text-muted-foreground text-xs">habla {Math.round(x.voz * 100)} %</span> : null}
                     {x.origen === "ia" ? (
                       <Badge variant="warning" className="gap-1">

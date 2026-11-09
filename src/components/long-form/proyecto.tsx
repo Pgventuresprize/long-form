@@ -15,6 +15,7 @@ import { BadgeNivel, etapaFallida, nombreEtapa, PASOS, pasoDe, quienActua } from
 import { RevisionGuion } from "./revision-guion"
 import { RevisionReparto } from "./revision-reparto"
 import { useSubidas } from "./subidas"
+import { TipoDeGrabacion } from "./tipo-grabacion"
 import { VistaVideo } from "./video"
 
 /**
@@ -101,6 +102,8 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
           {error}
         </p>
       ) : null}
+      {/* un tipo de grabacion equivocado puede hacer fallar el analisis: se corrige desde aqui */}
+      {p.tablero === "error" && p.estado.clasificacion ? <TipoDeGrabacion p={p} alCambiar={refrescar} /> : null}
 
       {trabajando ? <Progreso p={p} /> : null}
       <LineaDeTiempo p={p} />

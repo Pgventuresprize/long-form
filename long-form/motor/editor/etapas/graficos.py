@@ -353,9 +353,10 @@ def _pintar_todo(ctx, disp, g, items):
 
 
 def caja_foto(ctx):
-    if ctx.tipo == 'meet':
+    from .. import tipos
+    if tipos.de(ctx).disposicion == 'escenario':
         return (60, 60, 1362, 740)          # dentro del panel de contenido
-    return (1920 - 120 - 600, 120, 600, 640)  # a la derecha del invitado (César)
+    return (1920 - 120 - 600, 120, 600, 640)  # a la derecha de quien habla
 
 
 def correr(ctx):
@@ -383,7 +384,9 @@ def correr(ctx):
         tomas = [dict(t, pill=bool(t.get('pill') and any(a <= t['a'] < b for a, b in ok))) for t in tomas]
         ctx.guardar('tomas_render', tomas)
     items = armar(ctx, g, mapa, personas)
-    disp = 'escenario' if ctx.tipo == 'meet' else 'pantalla'
+    from .. import tipos
+    tipo = tipos.de(ctx)
+    disp = tipo.disposicion
     piezas = []
     rutas = _pintar_todo(ctx, disp, g, items)
     pi, pc = rutas.pop('intro'), rutas.pop('cierre')
@@ -398,8 +401,9 @@ def correr(ctx):
                        'capa': CAPA[t], 'sfx': sfx_in, 'sfx_fin': sfx_out,
                        'proteger': t in ('video', 'recorrido'),
                        'texto': it.get('texto') or it.get('nombre') or it.get('cta') or ''})
-    if ctx.tipo == 'camaras':
-        ctx.guardar('tomas_render', planos_para_fotos(ctx, items, mapa))
+    ajustadas = tipo.tomas_render(ctx, items, mapa)
+    if ajustadas is not None:
+        ctx.guardar('tomas_render', ajustadas)
     ctx.guardar('graficos', {'piezas': piezas, 'intro': str(pi), 'cierre': str(pc), 'disposicion': disp,
                              'intro_s': INTRO, 'cierre_s': OUTRO})
     from collections import Counter

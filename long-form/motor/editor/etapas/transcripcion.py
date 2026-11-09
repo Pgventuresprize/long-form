@@ -10,6 +10,7 @@ import json
 import numpy as np
 
 from .. import config, ffm, ia
+from .. import tipos
 
 PARTE = 600.0
 
@@ -67,8 +68,10 @@ def _groq_parte(ctx, wav, i, a, d):
 
 
 def transcribir(ctx, wav):
+    from .. import tipos
     dur = ffm.duracion(wav)
-    d = ctx.tj('tx')
+    # las partes hechas se guardan por audio: si el programa cambia (otro tipo, audio aparte) no se reusan
+    d = ctx.tj(f'tx_{tipos.huella(wav)}')
     d.mkdir(exist_ok=True)
     n = int(np.ceil(dur / PARTE))
     if config.GROQ_API_KEY:
@@ -119,7 +122,7 @@ def _reparto_camaras(ctx, segs):
     an = ctx.estado['analisis']
     personas = {p['nombre']: p for p in ctx.spec.get('personas', [])}
     out = []
-    for f in ctx.estado['ingesta']['fuentes']:
+    for f in tipos.fuentes(ctx):
         k = f['clave']
         nombre = f.get('persona') or ''
         p = personas.get(nombre, {})
@@ -139,10 +142,9 @@ def _reparto_camaras(ctx, segs):
 
 
 def correr(ctx):
-    if ctx.tipo == 'camaras':
-        wav = ctx.tj('programa16.wav')
-    else:
-        wav = ctx.tj('a16_A.wav')
+    from .. import tipos
+    tipo = tipos.de(ctx)
+    wav = tipos.programa(ctx, 16000)
     segs = None
     if ctx.reconstruyendo and ctx.estado.get('transcripcion', {}).get('remoto'):
         try:
@@ -153,9 +155,10 @@ def correr(ctx):
             segs = None
     if segs is None:
         segs = transcribir(ctx, wav)
-    if ctx.tipo == 'camaras':
-        _hablante_camaras(ctx, segs)
-    texto = ' '.join(s['texto'] for s in segs)
+    if not ctx.reconstruyendo:
+        ctx.avance('Viendo quién habla en cada frase', .9)
+    tipo.hablantes(ctx, segs)
+    texto =' '.join(s['texto'] for s in segs)
     ctx.log(f'{len(segs)} segmentos, {len(texto.split())} palabras')
     ctx.json_trabajo('transcripcion.json', segs)
     ctx.salida.mkdir(exist_ok=True)
@@ -168,12 +171,7 @@ def correr(ctx):
     if ctx.reconstruyendo:
         return
     ctx.avance('Armando la propuesta de reparto', .95)
-    if ctx.tipo == 'camaras':
-        personas = _reparto_camaras(ctx, segs)
-        reparto = {'tipo': 'camaras', 'personas': personas}
-    else:
-        from . import meet
-        reparto = meet.propuesta_reparto(ctx, segs)
+    reparto = tipo.reparto(ctx, segs)
     try:
         ia_extra = _nombres_por_ia(ctx, reparto, segs)
         if ia_extra:
@@ -195,7 +193,8 @@ def _nombres_por_ia(ctx, reparto, segs):
         'type': 'object', 'required': ['id', 'nombre', 'evidencia'],
         'properties': {'id': {'type': 'string'}, 'nombre': {'type': 'string'}, 'rol': {'type': 'string'},
                        'evidencia': {'type': 'string', 'description': 'frase textual de la transcripcion que lo sostiene, con su minuto'}}}}}}
-    lista = '\n'.join(f"- id {p['id']} ({p['tipo']}): habla {p.get('voz', 0):.0%}. Ejemplos: {' | '.join(p.get('muestras', [])[:3])}" for p in faltan)
+    lista = '\n'.join(f"- id {p['id']} ({p['tipo']}): " + (f"habla {p['voz']:.0%}. " if isinstance(p.get('voz'), (int, float)) else '')
+                      + f"Ejemplos: {' | '.join(p.get('muestras', [])[:3])}" for p in faltan)
     r = ia.pedir_json(
         'Eres asistente de edición de video. Propón nombres SOLO si la transcripción los sostiene (alguien se '
         'presenta o lo presentan). Si no hay evidencia, deja nombre vacío. Nunca inventes.',

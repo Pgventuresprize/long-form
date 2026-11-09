@@ -106,7 +106,7 @@ def local(pid, que='todo', hasta=None):
     etapas = ORDEN if que == 'todo' else [que]
     if que == 'todo':
         hecho = alm.estado(pid)
-        etapas = [e for e in ORDEN if e not in hecho]
+        etapas = [e for e in ORDEN if {'clasificar': 'clasificacion'}.get(e, e) not in hecho]
     for e in etapas:
         correr_etapa(alm, pid, e, encadenar=False)
         if e == hasta:

@@ -101,6 +101,24 @@ async function seguir(p: Page, revisiones: boolean) {
     const [b3] = await p.$$("xpath/.//button[contains(., 'Aprobar de todas formas')]")
     if (b3) await b3.click()
   }
+  // LF_CAMBIAR_TIPO=<nombre visible>: en quien es quien corrige el tipo y espera a que vuelva con ese tipo.
+  const otroTipo = process.env.LF_CAMBIAR_TIPO
+  if (revisiones && otroTipo && nivel === "detallado") {
+    await esperarTexto(p, /confirma quién es quién/i, 60)
+    await new Promise((r) => setTimeout(r, 1500))
+    await foto(p, "3a-tipo-reconocido")
+    await p.click('button[aria-label="Elige el tipo de grabación"]')
+    await new Promise((r) => setTimeout(r, 800))
+    const [opcion] = await p.$$(`xpath/.//*[@role='option' and contains(., '${otroTipo}')]`)
+    if (!opcion) throw new Error(`No está la opción ${otroTipo}`)
+    await opcion.click()
+    const [cambiar] = await p.$$("xpath/.//button[contains(., 'Cambiar y volver a analizar')]")
+    await cambiar.click()
+    await esperarTexto(p, /Studio está trabajando/, 2)
+    await esperarTexto(p, new RegExp(`Elegido por ti[\\s\\S]*${otroTipo}`), 60)
+    await new Promise((r) => setTimeout(r, 1500))
+    await foto(p, "3b-tipo-cambiado")
+  }
   // Detallado siempre para en quien es quien; Normal solo si hay nombres sin confirmar.
   if (revisiones && nivel === "detallado") await pasar(/confirma quién es quién/i, "Aprobar y seguir", "3-quien-es-quien")
   if (revisiones && nivel === "normal") {

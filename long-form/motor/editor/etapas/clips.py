@@ -20,6 +20,7 @@ import numpy as np
 
 from .. import ffm, ia
 from ..contexto import Mapa
+from .. import tipos
 
 ESQUEMA = {'type': 'object', 'required': ['clips'], 'properties': {'clips': {'type': 'array', 'items': {
     'type': 'object', 'required': ['inicio', 'fin', 'titulo', 'instagram', 'tiktok'], 'properties': {
@@ -211,7 +212,7 @@ def render_div_meet(ctx, video, o0, dur, mapa, intro, tomas, audio, subs, salida
             BY = PY + 632
             k = max(1080 / w, BH / h)
             sw, sh = int(round(w * k / 2) * 2), int(round(h * k / 2) * 2)
-            fc = (f'[0:v]fps={FPS},setpts=PTS-STARTPTS,split[a][b];[a]crop={pw}:{ph}:{px}:{py},scale=1080:608:flags=lanczos[p];'
+            fc = (f'[0:v]setpts=PTS-STARTPTS,fps={FPS},split[a][b];[a]crop={pw}:{ph}:{px}:{py},scale=1080:608:flags=lanczos[p];'
                   f'[b]crop={w}:{h}:{x}:{y},scale={sw}:{sh}:flags=lanczos,crop=1080:{BH}:{(sw - 1080) // 2}:{(sh - BH) // 2}[q];'
                   f'color=c=0x0B0908:s=1080x1920:r={FPS}[bg];[bg][p]overlay=0:{PY}:shortest=1[c1];[c1][q]overlay=0:{BY}[c2];'
                   f'[c2][1:v]overlay=(W-w)/2:110[c3];[c3][2:v]overlay=0:{BY + BH - 300}[o]')
@@ -222,7 +223,7 @@ def render_div_meet(ctx, video, o0, dur, mapa, intro, tomas, audio, subs, salida
             kb = max(1080 / w, 1920 / h)
             bw, bh = int(round(w * kb / 2) * 2), int(round(h * kb / 2) * 2)
             yy = (1920 - fh) // 2
-            fc = (f'[0:v]fps={FPS},setpts=PTS-STARTPTS,crop={w}:{h}:{x}:{y},split[a][b];'
+            fc = (f'[0:v]setpts=PTS-STARTPTS,fps={FPS},crop={w}:{h}:{x}:{y},split[a][b];'
                   f'[a]scale={bw // 4 * 2}:{bh // 4 * 2},boxblur=20:2,scale={bw}:{bh},crop=1080:1920:{(bw - 1080) // 2}:{(bh - 1920) // 2},'
                   f'eq=brightness=-0.18:saturation=0.8[bg];[b]scale={sw}:{sh}:flags=lanczos,crop=1080:{fh}:{(sw - 1080) // 2}:{(sh - fh) // 2}[v];'
                   f'[bg][v]overlay=0:{yy}[c1];[c1][1:v]overlay=(W-w)/2:110[c2];[c2][2:v]overlay=0:{yy + fh - 300}[o]')
@@ -236,7 +237,7 @@ def render_div_meet(ctx, video, o0, dur, mapa, intro, tomas, audio, subs, salida
 def render_div_camaras(ctx, mapa, o0, dur, audio, subs, salida):
     """Las dos camaras una sobre otra (1080x960 cada una), desde las fuentes y con lo mismo que se conserva."""
     an = ctx.estado['analisis']
-    fuentes = {f['clave']: f for f in ctx.estado['ingesta']['fuentes']}
+    fuentes = {f['clave']: f for f in tipos.fuentes(ctx)}
     rep = {p['id']: p for p in ctx.aprobado('reparto')['personas']}
     A, B = an['claves'][:2]
     FPS = ctx.FPS
@@ -261,7 +262,7 @@ def render_div_camaras(ctx, mapa, o0, dur, audio, subs, salida):
             W0, H0 = f['ancho'], f['alto']
             cw = int(min(W0, H0 * 1080 / 960)) & ~1
             cx = int(np.clip(cara[0] - cw / 2, 0, W0 - cw)) & ~1
-            return f'[{idx}:v]fps={FPS},setpts=PTS-STARTPTS,crop={cw}:{H0}:{cx}:0,scale=1080:960:flags=lanczos,eq=contrast=1.04:saturation=1.06[v{idx}]'
+            return f'[{idx}:v]setpts=PTS-STARTPTS,fps={FPS},crop={cw}:{H0}:{cx}:0,scale=1080:960:flags=lanczos,eq=contrast=1.04:saturation=1.06[v{idx}]'
         fc = (cubrir(0, cara_a, fuentes[A]) + ';' + cubrir(1, cara_b, fuentes[B]) + ';'
               '[v0][v1]vstack[s];[s][2:v]overlay=0:660[c1];[c1][3:v]overlay=0:1620[o]')
         tt = d / f'{salida.stem}_{i:03d}.mp4'
@@ -325,18 +326,20 @@ def correr(ctx):
         ws = palabras(segs, p['inicio'], p['fin'], mapa, fix, o0)
         s_srt = srt(ws, ctx.salida / f'{base}.srt')
         subs_real = ass(ctx, s_srt, d / f'{base}_real.ass', '9:16', 64, 0.80) if subt else None
-        subs_div = ass(ctx, s_srt, d / f'{base}_div.ass', '9:16', 64, 0.5 if ctx.tipo == 'camaras' else 0.47) if subt else None
         archivos = []
         sal = ctx.salida / f'{base}_real.mp4'
         render_real(ctx, video, mapa.intro + o0, dur, audio, subs_real, sal)
         archivos.append(sal)
-        sal = ctx.salida / f'{base}_div.mp4'
-        tomas = ctx.estado.get('tomas_render') or ctx.estado['tomas']
-        if ctx.tipo == 'meet':
-            render_div_meet(ctx, video, o0, dur, mapa, mapa.intro, tomas, audio, subs_div, sal)
-        else:
-            render_div_camaras(ctx, mapa, o0, dur, audio, subs_div, sal)
-        archivos.append(sal)
+        # La version dividida (dos personas, una arriba y otra abajo) solo existe donde hay dos encuadres.
+        if tipos.de(ctx).clip_dividido():
+            subs_div = ass(ctx, s_srt, d / f'{base}_div.ass', '9:16', 64, 0.5 if ctx.tipo == 'camaras' else 0.47) if subt else None
+            sal = ctx.salida / f'{base}_div.mp4'
+            tomas = ctx.estado.get('tomas_render') or ctx.estado['tomas']
+            if ctx.tipo == 'meet':
+                render_div_meet(ctx, video, o0, dur, mapa, mapa.intro, tomas, audio, subs_div, sal)
+            else:
+                render_div_camaras(ctx, mapa, o0, dur, audio, subs_div, sal)
+            archivos.append(sal)
         md = (f'# {i:02d} · {p["titulo"]}\n\n- Tramo del video: {int(o0 // 60)}:{int(o0 % 60):02d} ({dur:.0f} s)\n'
               f'- Archivos: {", ".join(a.name for a in archivos)}\n\n## Instagram Reels\n\n```\n{p.get("instagram", "")}\n```\n\n'
               f'## TikTok\n\n```\n{p.get("tiktok", "")}\n```\n')

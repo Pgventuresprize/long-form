@@ -168,7 +168,7 @@ class AlmacenSupabase(Almacen):
         self._cuentas[pid] = p['account_id']
         spec = dict(p.get('spec') or {})
         # La marca es la cuenta: su estilo long form se arma como carpeta en marca().
-        spec.update({'id': p['id'], 'titulo': p['titulo'], 'tipo': p['tipo'] or spec.get('tipo') or 'camaras',
+        spec.update({'id': p['id'], 'titulo': p['titulo'], 'tipo': p['tipo'] or spec.get('tipo'),
                      'marca': p['account_id'], 'account_id': p['account_id'], 'esfuerzo': p['esfuerzo'],
                      'notas_editoriales': spec.get('notas_editoriales') or p.get('notas') or '', 'cta_defecto': p.get('cta_defecto')})
         spec['archivos'] = self._get('lf_archivos', proyecto_id=f'eq.{pid}', subida='eq.lista', select='*', order='creado.asc')

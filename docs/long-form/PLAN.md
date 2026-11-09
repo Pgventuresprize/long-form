@@ -88,6 +88,65 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
 
 - **Pendiente para la fase 6:** la pestaña Difusión es un espacio reservado.
 
+**Fase 5 hecha (2026-11-09), en local:**
+- **`clasificar`**, una etapa nueva entre la ingesta y el análisis:
+  1. Une las partes sucesivas: videos que no suenan a la vez, en orden de fecha o de nombre. Varias cámaras
+     grabadas por partes se unen cada una con las suyas.
+  2. Mide, en 16 cuadros por pista: caras, el borde y el fondo de Meet, cuánto del cuadro es plano, si el PDF
+     coincide y los cambios de plano por minuto.
+  3. Decide con reglas. Claude con visión solo desempata, y solo entre los tipos que las reglas dejan en pie.
+  4. Guarda la evidencia en palabras (`estado.clasificacion`, `lf_proyectos.tipo` y `evidencia`).
+- **Tipos nuevos:**
+  - Una cámara: reencuadre por caras, quién habla por el movimiento de la boca, cambios de plano en las pausas
+    de idea.
+  - Pódcast o video ya editado: respeta sus cortes.
+  - Charla con diapositivas: lámina original del PDF en el escenario de la marca y la persona en recuadro.
+  - Grabación de pantalla: acercamiento a la zona donde cambia la imagen.
+- **Para todos:** audio aparte sincronizado, color igualado entre cámaras, reducción de ruido suave (video y
+  audio) y corte J (el audio entra 4 cuadros antes en cámaras y una cámara).
+- **El motor ya no ramifica por tipo:** cada tipo responde las mismas preguntas en `long-form/motor/editor/tipos.py`.
+- **En Studio:**
+  - El proyecto nace sin tipo.
+  - Quién es quién muestra el tipo, qué tan seguro está, cómo se va a editar y por qué.
+  - "¿No es este?" fija otro tipo y vuelve a analizar. También se puede desde un error.
+- **Arreglos de paso:**
+  - meet.py tenía el texto mal codificado ("grabaciÃ³n" en los avisos), y por eso no reconocía los nombres que
+    Meet corta con "…".
+  - El emparejado de láminas no reconocía una lámina a pantalla completa.
+  - Un video exportado de un editor que cambia de formato a mitad (el talk show de César) hacía que ffmpeg
+    reiniciara los filtros, y el trozo salía 15 s más corto. Afectaba a todos los tipos. Ahora cada entrada lleva
+    `-reinit_filter 0`, los trozos miden como mucho 20 s y cada trozo se cuenta al salir: si le faltan cuadros, la
+    etapa se detiene con el motivo en vez de entregar un video corto.
+- **Pruebas** (`long-form/motor/tests/prueba_tipos_video.py`), una por tipo, con recortes de grabaciones reales:
+  el taller de Meet del 2026-11-05 con su PDF, las dos cámaras de César, el talk show editado y una cámara con
+  tres personas. Charla y pantalla usan videos generados.
+
+  Resultado en esta máquina, en Rápido, sin Claude ni Groq: los ocho casos reconocen su tipo y llegan a un video
+  con el control de calidad limpio.
+
+  | Caso | Muestra | Tipo reconocido | Tiempo total |
+  |---|---|---|---|
+  | Una cámara | 2 min, una persona | una cámara (seguro) | 3 min |
+  | Partes sucesivas | los mismos 2 min en dos archivos, subidos al revés | una cámara, unidas en orden | 3 min |
+  | Grupo | 75 s, tres personas en un café | una cámara | 10 min |
+  | Pódcast | 2 min del talk show editado | pódcast (5 cortes por minuto) | 3 min |
+  | Pantalla | 2 min generados | pantalla, con dos acercamientos | 2 min |
+  | Charla | 2 min: cámara y proyección del PDF del taller | charla, sigue las 8 láminas | 8 min |
+  | Cámaras | las dos cámaras de César, 2 min | cámaras | 9 min |
+  | Meet | 2,5 min del taller con su PDF | Meet (borde de quien habla en 14 de 16 cuadros) | 16 min |
+
+  También en el navegador, contra Studio y la base local (`scripts/longform-e2e.ts`):
+  - un video de una cámara llega a quién es quién con su tipo y la evidencia;
+  - "¿No es este?" lo corrige a pódcast: vuelve a analizar, reutiliza la transcripción y termina el video.
+
+- **Lo que no quedó probado:**
+  - El desempate con Claude (las pruebas corren sin clave).
+  - Quién habla por la boca con varias personas: en la muestra del café solo una mira a la cámara; las otras
+    están de perfil o de espaldas y OpenCV no las ve. Un detector mejor (YuNet) necesita un modelo aparte.
+  - Videos de una hora por tipo: las muestras son de 1 a 2,5 minutos.
+  - Clasificar cuesta entre 20 s y 2,5 min por proyecto en esta máquina. Lo caro es buscar láminas del PDF,
+    acotado a 8 cuadros y 5 coincidencias.
+
 ### Decisiones tomadas (2026-11-08)
 
 - **D1.** Se saca el esquema de producción en solo lectura y es la base local. Antes de desplegar, las migraciones

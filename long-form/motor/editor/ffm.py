@@ -31,7 +31,7 @@ def correr(args, **kw):
 
 def sondear(ruta):
     r = subprocess.run([config.FFPROBE, '-v', 'error', '-show_entries',
-                        'format=duration:stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,sample_rate,channels:stream_side_data=rotation',
+                        'format=duration:format_tags=creation_time:stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,sample_rate,channels,pix_fmt:stream_side_data=rotation',
                         '-of', 'json', str(ruta)], capture_output=True, text=True)
     if r.returncode != 0:
         raise ErrorFfmpeg(f'ffprobe no pudo leer {ruta}: {r.stderr[-500:]}')
@@ -60,12 +60,71 @@ def sondear(ruta):
         'fps': fr(v.get('avg_frame_rate', '0/1')) if v else 0.0,
         'fps_nominal': fr(v.get('r_frame_rate', '0/1')) if v else 0.0,
         'codec': v.get('codec_name') if v else None,
+        'pix_fmt': v.get('pix_fmt') if v else None,
         'rotacion': rot,
+        'creado': (j.get('format', {}).get('tags') or {}).get('creation_time'),
     }
+
+
+def cuadro(ruta, t, ancho, gris=False):
+    """Un cuadro en el segundo t, reducido a `ancho`, como arreglo (BGR o gris). None si no se pudo leer."""
+    fmt, canales = ('gray', 1) if gris else ('bgr24', 3)
+    p = subprocess.run([config.FFMPEG, '-v', 'error', '-ss', f'{max(t, 0):.3f}', '-i', str(ruta), '-frames:v', '1',
+                        '-vf', f'scale={ancho}:-2', '-f', 'rawvideo', '-pix_fmt', fmt, '-'], capture_output=True)
+    alto = len(p.stdout) // (ancho * canales)
+    if alto < 2:
+        return None
+    im = np.frombuffer(p.stdout[:ancho * canales * alto], np.uint8)
+    return im.reshape(alto, ancho) if gris else im.reshape(alto, ancho, canales)
+
+
+def cuadros(ruta, carpeta, paso, ancho, duracion):
+    """Un cuadro cada `paso` s a JPG en `carpeta`, con su tiempo real. Decodifica solo los cuadros clave del
+    video (una hora en 4K se lee en minutos, no en lo que dura); si el video tiene muy pocos, decodifica todo.
+    Devuelve [(t, ruta_jpg)] y lo deja en carpeta/tiempos.json para no repetirlo."""
+    import re
+    carpeta = Path(carpeta)
+    hecho = carpeta / 'tiempos.json'
+    if hecho.exists():
+        return [(t, carpeta / n) for t, n in json.loads(hecho.read_text(encoding='utf8'))]
+    carpeta.mkdir(parents=True, exist_ok=True)
+    for f in carpeta.glob('*.jpg'):
+        f.unlink()
+
+    def sacar(solo_clave):
+        sel = f"select='isnan(prev_selected_t)+gte(t-prev_selected_t\\,{paso})',scale={ancho}:-2,showinfo"
+        cmd = [config.FFMPEG, '-hide_banner', '-nostdin', '-y', '-loglevel', 'info']
+        if solo_clave:
+            cmd += ['-skip_frame', 'nokey']
+        cmd += ['-i', str(ruta), '-vf', sel, '-fps_mode', 'vfr', '-q:v', '4', str(carpeta / '%05d.jpg')]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise ErrorFfmpeg(f'ffmpeg no pudo sacar cuadros de {ruta}: {r.stderr[-800:]}')
+        return [float(m) for m in re.findall(r'pts_time:\s*([\d.]+)', r.stderr)]
+    ts = sacar(True)
+    # si los cuadros clave quedan muy separados (x264 pone uno cada ~8 s), se decodifica todo
+    huecos = np.diff(ts) if len(ts) > 2 else np.array([duracion])
+    if len(ts) < duracion / (paso * 4) or float(np.median(huecos)) > paso * 2:
+        for f in carpeta.glob('*.jpg'):
+            f.unlink()
+        ts = sacar(False)
+    out = [(round(t, 3), f'{i + 1:05d}.jpg') for i, t in enumerate(ts) if (carpeta / f'{i + 1:05d}.jpg').exists()]
+    hecho.write_text(json.dumps(out), encoding='utf8')
+    return [(t, carpeta / n) for t, n in out]
 
 
 def duracion(ruta):
     return sondear(ruta)['duracion']
+
+
+def cuadros_de(ruta):
+    """Cuantos cuadros de video tiene un archivo, contando paquetes (no decodifica: es rapido)."""
+    r = subprocess.run([config.FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
+                        'stream=nb_read_packets', '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True)
+    try:
+        return int(r.stdout.strip().split(',')[0])
+    except ValueError:
+        return -1
 
 
 def extraer_audio(entrada, salida, sr=16000, canales=1, filtro=None, desde=None, dur=None):
