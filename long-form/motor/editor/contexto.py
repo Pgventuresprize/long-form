@@ -75,7 +75,12 @@ class Contexto:
         return list(av or [])
 
     def avance(self, detalle, progreso=None):
-        self.alm.fase(self.pid, self.etapa, detalle, progreso)
+        """El progreso es informativo: si la base tarda o se cae un momento, la etapa sigue. El siguiente
+        avance (o el final de la etapa) vuelve a dejar el estado al dia."""
+        try:
+            self.alm.fase(self.pid, self.etapa, detalle, progreso)
+        except Exception as e:
+            print(f'[{self.pid}] no se pudo reportar el avance ({type(e).__name__}); la etapa sigue', flush=True)
 
     def aviso(self, msg):
         """Algo que la persona debe revisar antes de publicar: queda en el reporte final."""

@@ -5,7 +5,8 @@
  *   npx tsx scripts/longform-e2e.ts <nivel> <carpeta-capturas> <video> [<video> ...]
  *
  * Necesita `next dev` (LF_CAPTURAS_URL), el motor (`long-form/motor/servir.ps1`), la semilla y una marca con
- * estilo confirmado abierta (LF_CUENTA=<slug>). Deja una captura de cada paso.
+ * estilo confirmado abierta (LF_CUENTA=<slug>). Deja una captura de cada paso. Con LF_PROYECTO=<id> no crea
+ * nada: abre ese proyecto en error, pulsa Reintentar y espera el video.
  */
 import { mkdirSync } from "node:fs"
 import path from "node:path"
@@ -55,6 +56,25 @@ async function main() {
   await p.waitForFunction(() => location.pathname !== "/login", { timeout: 120_000 })
   if (process.env.LF_CUENTA) await p.setCookie({ name: "hancel_cuenta", value: process.env.LF_CUENTA, url: BASE })
 
+  // LF_PROYECTO=<id> retoma un proyecto que fallo: pulsa Reintentar y sigue desde donde este.
+  const retomar = process.env.LF_PROYECTO
+  if (retomar) {
+    await p.goto(`${BASE}/long-form/${retomar}`, { waitUntil: "networkidle2" })
+    await foto(p, "0-error")
+    const [re] = await p.$$("xpath/.//button[contains(., 'Reintentar')]")
+    if (!re) throw new Error("No hay botón Reintentar en el proyecto")
+    await re.click()
+    await new Promise((r) => setTimeout(r, 4000))
+    await foto(p, "0-reintentando")
+  } else await crear(p)
+
+  // Un proyecto retomado ya paso sus revisiones (reintentar repite solo la etapa que fallo).
+  await seguir(p, !retomar)
+  await b.close()
+  console.log(`listo en ${seg()}`)
+}
+
+async function crear(p: Page) {
   await p.goto(`${BASE}/long-form/nuevo`, { waitUntil: "networkidle2" })
   const input = await p.$('input[type=file][multiple]')
   await input!.uploadFile(...videos)
@@ -67,7 +87,10 @@ async function main() {
   await empezar.click()
   await p.waitForFunction(() => /\/long-form\/[0-9a-f-]{36}$/.test(location.pathname), { timeout: 120_000 })
   await foto(p, "2-subiendo")
+}
 
+/** Desde un proyecto abierto: pasa las revisiones que pida el nivel y espera el video. */
+async function seguir(p: Page, revisiones: boolean) {
   const pasar = async (re: RegExp, boton: string, nombre: string) => {
     await esperarTexto(p, re, 60)
     await new Promise((r) => setTimeout(r, 1500))
@@ -78,8 +101,13 @@ async function main() {
     const [b3] = await p.$$("xpath/.//button[contains(., 'Aprobar de todas formas')]")
     if (b3) await b3.click()
   }
-  if (nivel === "detallado") await pasar(/confirma quién es quién/i, "Aprobar y seguir", "3-quien-es-quien")
-  if (nivel !== "rapido") await pasar(/revisa el guion y apruébalo/i, "Aprobar guion", "4-guion")
+  // Detallado siempre para en quien es quien; Normal solo si hay nombres sin confirmar.
+  if (revisiones && nivel === "detallado") await pasar(/confirma quién es quién/i, "Aprobar y seguir", "3-quien-es-quien")
+  if (revisiones && nivel === "normal") {
+    const texto = await esperarTexto(p, /confirma quién es quién|revisa el guion y apruébalo/i, 60)
+    if (/confirma quién es quién/i.test(texto)) await pasar(/confirma quién es quién/i, "Aprobar y seguir", "3-quien-es-quien")
+  }
+  if (revisiones && nivel !== "rapido") await pasar(/revisa el guion y apruébalo/i, "Aprobar guion", "4-guion")
 
   await esperarTexto(p, /Te toca: revisar el video/, 90)
   await p.reload({ waitUntil: "networkidle2" })
@@ -90,8 +118,6 @@ async function main() {
   await p.setViewport({ width: 390, height: 844 })
   await new Promise((r) => setTimeout(r, 1000))
   await foto(p, "6-video-listo-390")
-  await b.close()
-  console.log(`listo en ${seg()}`)
 }
 
 main().catch((e) => {

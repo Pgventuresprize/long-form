@@ -33,9 +33,16 @@ const FASE_A_PASO: Record<string, number> = {
   enviado: 5,
 }
 
+/** La etapa que fallo: el motor deja el detalle como "<etapa>: <error>". */
+export function etapaFallida(p: { detalle?: string | null }): string | null {
+  const m = /^([a-z_]+):/.exec(p.detalle ?? "")
+  return m && m[1] in FASE_A_PASO ? m[1] : null
+}
+
 export function pasoDe(p: { fase: string; tablero: Tablero; detalle?: string | null }): number {
   if (p.tablero === "enviado") return 5
   if (p.tablero === "difusion") return 4
+  if (p.tablero === "error") return FASE_A_PASO[etapaFallida(p) ?? ""] ?? 1
   if (p.fase === "en_cola" && p.detalle) return FASE_A_PASO[p.detalle] ?? 1
   return FASE_A_PASO[p.fase] ?? 1
 }

@@ -11,7 +11,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Proyecto } from "@/engine/long-form/datos"
 
-import { BadgeNivel, nombreEtapa, PASOS, pasoDe, quienActua } from "./comun"
+import { BadgeNivel, etapaFallida, nombreEtapa, PASOS, pasoDe, quienActua } from "./comun"
 import { RevisionGuion } from "./revision-guion"
 import { RevisionReparto } from "./revision-reparto"
 import { useSubidas } from "./subidas"
@@ -66,8 +66,14 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
         <div className="bg-destructive/10 flex flex-wrap items-center gap-3 rounded-xl p-4" role="alert">
           <AlertCircleIcon className="text-destructive size-5 shrink-0" aria-hidden />
           <div className="min-w-0 flex-1 text-sm">
-            <div className="font-medium">Algo falló en {nombreEtapa(p.trabajos.find((t) => t.estado === "error")?.etapa ?? p.fase).toLowerCase()}</div>
-            <div className="text-muted-foreground break-words">{p.detalle}</div>
+            <div className="font-medium">No se pudo terminar: {nombreEtapa(etapaFallida(p) ?? p.trabajos.find((t) => t.estado === "error")?.etapa ?? p.fase)}</div>
+            <div className="text-muted-foreground">Reintenta: retoma desde este paso y conserva todo lo anterior.</div>
+            {p.detalle ? (
+              <details className="text-muted-foreground mt-1 text-xs">
+                <summary className="cursor-pointer">Detalle técnico</summary>
+                <p className="mt-1 font-mono break-words">{p.detalle}</p>
+              </details>
+            ) : null}
           </div>
           <Button
             variant="outline"

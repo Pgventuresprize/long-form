@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 
 import { cambiarCuenta } from "@/app/cuenta/actions"
 import { cerrarSesion } from "@/app/(acceso)/actions"
+import { misAvisos } from "@/app/long-form/actions"
 import { AGENTES } from "@/lib/agentes-catalogo"
 
 import s from "./chat.module.css"
@@ -65,6 +66,18 @@ export function MenuFunciones(props: {
     return () => document.removeEventListener("keydown", tecla)
   }, [onCerrar])
 
+  // Avisos de Long-form sin leer: un punto en su item. Se piden una vez al abrir el menu.
+  const conLongForm = (props.cuenta.funciones ?? []).includes("long_form")
+  const [lfSinLeer, setLfSinLeer] = React.useState(0)
+  React.useEffect(() => {
+    if (!conLongForm) return
+    let vivo = true
+    misAvisos().then((r) => vivo && r.ok && setLfSinLeer(r.sinLeer))
+    return () => {
+      vivo = false
+    }
+  }, [conLongForm])
+
   const advance = props.cuenta.plan === "advance"
   const inicial = props.cuenta.nombre.trim().charAt(0).toUpperCase() || "?"
 
@@ -94,6 +107,11 @@ export function MenuFunciones(props: {
                   <span className={s.chev} title="Beta privada">
                     <Ico d={<path d="M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5z" />} />
                     <span className="sr-only">(beta privada)</span>
+                  </span>
+                ) : null}
+                {n.funcion === "long_form" && lfSinLeer ? (
+                  <span className="bg-brand ml-auto size-2 shrink-0 rounded-full" title={`${lfSinLeer} avisos sin leer`}>
+                    <span className="sr-only">({lfSinLeer} avisos sin leer)</span>
                   </span>
                 ) : null}
                 {n.sub ? (

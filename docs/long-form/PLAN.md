@@ -1,7 +1,7 @@
 # Long-form: plan
 
-Plan del 2026-11-08 para construir Long-form dentro de Plogy Studio, en la rama local `long-form`. Nada de esto
-está construido. Se para aquí hasta que se apruebe.
+Plan del 2026-11-08 para construir Long-form dentro de Plogy Studio, en la rama local `long-form`. Aprobado; las
+fases 2 a 4 están construidas en local (ver Estado). Nada está desplegado.
 
 Fuentes: los documentos de Studio (README, MOTOR, FLUJO, ONBOARDING, MARCAS, ITERACIONES, PANEL-ADMIN), su código
 y el motor de `plogy-longform` (README, ARQUITECTURA, docs/PROCESO-ORIGINAL, `worker/editor`, `supabase/schema.sql`).
@@ -67,8 +67,26 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
   paso es repartir el render entre contenedores.
 - **Clips:** no se renderizan con el largo (`opciones.clips = 0`); salen de Difusión.
 - **Personas recurrentes:** viven dentro de `lf_estilos.config`, no en una tabla `lf_personas`.
-- **Plantillas de los gráficos:** quedaron en `long-form/plantillas` como HTML y CSS con huecos. Studio ya las usa;
-  el motor las leerá en la fase 3.
+- **Plantillas de los gráficos:** quedaron en `long-form/plantillas` como HTML y CSS con huecos. Studio y el motor
+  las usan.
+
+**Fase 4 hecha (2026-11-09), en local:**
+- **Pantallas:** inicio (tablero), nuevo video, proyecto con su paso a paso, quién es quién, guion, video listo
+  (control de calidad, versiones, Corregir, título, descripción y capítulos para copiar) y la campana de avisos.
+  El ítem Long-form del menú del chat lleva un punto cuando hay avisos sin leer.
+- **Subidas:** por TUS directo a Storage, reanudables, vivas mientras la pestaña esté abierta.
+- **Errores:** el paso que falló se marca en la barra, el mensaje es para la persona (el detalle técnico va plegado)
+  y Reintentar retoma desde ese paso. Un reporte de avance que falla ya no tumba la etapa.
+- **Probado en el navegador** (`scripts/longform-e2e.ts`, con capturas a 1440 y 390 px), cortes de 2 minutos de
+  dos cámaras, sin Claude ni Groq:
+
+  | Nivel | Paradas | Resultado |
+  |---|---|---|
+  | Detallado | quién es quién y guion | video listo en 14 min, control de calidad limpio |
+  | Normal | quién es quién (nombres sin confirmar) y guion | el render falló por un tiempo de espera de la base local con la máquina cargada; Reintentar lo terminó |
+  | Rápido | ninguna | video listo en 7,5 min, control de calidad limpio |
+
+- **Pendiente para la fase 6:** la pestaña Difusión es un espacio reservado.
 
 ### Decisiones tomadas (2026-11-08)
 

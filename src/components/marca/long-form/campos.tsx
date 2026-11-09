@@ -57,7 +57,8 @@ export function Opciones<T extends string>({ etiqueta, valor, opciones, onCambio
   return (
     <fieldset className="flex min-w-0 flex-col gap-1.5">
       <legend className="mb-1.5 text-sm font-medium">{etiqueta}</legend>
-      <div className="flex flex-wrap gap-2">
+      {/* Con descripcion, columnas iguales en una fila; sin ella, botones que se acomodan. */}
+      <div className={opciones.some((o) => o.detalle) ? "grid gap-2 sm:auto-cols-fr sm:grid-flow-col" : "flex flex-wrap gap-2"}>
         {opciones.map((o) => (
           <button
             key={o.valor}

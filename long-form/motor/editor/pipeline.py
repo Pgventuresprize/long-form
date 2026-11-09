@@ -27,6 +27,10 @@ from .contexto import Contexto
 
 ORDEN = ['ingesta', 'analisis', 'transcripcion', 'plan', 'graficos', 'render', 'qa', 'clips']
 COMPUERTAS = {'transcripcion': ('revision_reparto', 'reparto'), 'plan': ('revision_guion', 'guion')}
+# Los mismos nombres que muestra Studio (src/components/long-form/comun.tsx).
+NOMBRES = {'ingesta': 'Leyendo los archivos', 'analisis': 'Analizando quién habla', 'clasificar': 'Reconociendo el tipo de grabación',
+           'transcripcion': 'Transcribiendo', 'plan': 'Armando el guion', 'graficos': 'Dibujando los gráficos',
+           'render': 'Editando el video', 'qa': 'Revisando la calidad', 'clips': 'Haciendo los clips'}
 
 # Los avisos de la campana de Studio al terminar cada etapa.
 AVISOS = {
@@ -119,7 +123,9 @@ def correr_etapa(alm, pid, etapa, encadenar=True):
         except Exception as e:  # noqa: BLE001
             ctx.log(f'{type(e).__name__}: {e}\n{traceback.format_exc()[-3000:]}', 'error')
             alm.fase(pid, 'error', f'{etapa}: {e}'[:480])
-            alm.aviso(pid, 'error', 'Algo falló', f'En {etapa}: {e}'[:900])
+            # El aviso es para la persona: sin el error tecnico, que queda en el detalle y en los eventos.
+            alm.aviso(pid, 'error', f'No se pudo terminar: {NOMBRES.get(etapa, etapa)}',
+                      'Entra al video y pulsa Reintentar: retoma desde ese paso y conserva lo anterior.')
             raise
         t1 = time.time()
         cpu = _cpu_s() - c0

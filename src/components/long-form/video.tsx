@@ -39,7 +39,8 @@ export function VistaVideo({ p, urls, alCorregir }: { p: Proyecto; urls: Record<
     <div className="flex flex-col gap-4">
       <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-2">
-          {actual ? <video src={actual} controls preload="metadata" className="aspect-video w-full rounded-xl bg-black" /> : null}
+          {/* La portada es la miniatura del tablero: el primer cuadro del video es la intro, casi siempre oscura. */}
+          {actual ? <video src={actual} poster={p.miniatura ? urls[p.miniatura] : undefined} controls preload="metadata" className="aspect-video w-full rounded-xl bg-black" /> : null}
           <div className="flex flex-wrap items-center gap-2">
             {actual ? (
               <Button nativeButton={false} variant="brand" render={<a href={actual} download={render.archivo} />}>
