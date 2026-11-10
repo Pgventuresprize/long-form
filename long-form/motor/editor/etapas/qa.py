@@ -17,7 +17,7 @@ from .. import config, ffm
 
 def _detectar(ruta, filtro):
     r = subprocess.run([config.FFMPEG, '-hide_banner', '-nostdin', '-i', str(ruta), '-vf', filtro, '-an', '-f', 'null', '-'],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding='utf-8', errors='replace')
     return r.stderr
 
 
@@ -49,10 +49,10 @@ def correr(ctx):
         ruta = ctx.alm.traer(ctx.pid, r['remoto'], ctx.salida / r['archivo'])
     info = ffm.sondear(ruta)
     p = subprocess.run([config.FFPROBE, '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=duration',
-                        '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True)
+                        '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     dur_a = float(p.stdout.strip() or 0)
     p = subprocess.run([config.FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration',
-                        '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True)
+                        '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     dur_v = float(p.stdout.strip() or 0)
     problemas = []
     if abs(dur_a - dur_v) > 0.15:

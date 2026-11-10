@@ -180,7 +180,7 @@ def cortes_por_minuto(ruta, dur):
     for a, w in ventanas:
         r = subprocess.run([config.FFMPEG, '-hide_banner', '-nostdin', '-loglevel', 'info', '-ss', f'{max(a, 0):.2f}', '-t', f'{w:.2f}',
                             '-i', str(ruta), '-an', '-vf', "scale=160:-2,select='gt(scene\\,0.4)',showinfo", '-f', 'null', '-'],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding='utf-8', errors='replace')
         cortes += len(re.findall(r'pts_time:', r.stderr))
         total += w
     return cortes / max(total / 60, 1e-6)

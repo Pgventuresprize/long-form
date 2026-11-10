@@ -169,6 +169,33 @@ def prueba_trozos_cortos():
         assert abs(t - u / 30) < 1e-6                                                   # cada trozo sabe su segundo
 
 
+def prueba_nombre_con_tildes():
+    """ffmpeg escribe el nombre del archivo en UTF-8; leerlo con la codificacion de Windows tumbaba clasificar
+    ("Grabación de pantalla..." de Mac)."""
+    import os
+    import shutil
+    import tempfile
+    from editor import ffm
+    muestra = Path(os.environ.get('LF_MUESTRAS', r'C:\Users\juanf\lf-local\muestras')) / 'tipos' / 'C0001.MP4'
+    if not muestra.exists():
+        print('      (sin muestra C0001.MP4: se salta)')
+        return
+    with tempfile.TemporaryDirectory() as d:
+        # la "Á" es 0xC3 0x81 en UTF-8, y 0x81 no existe en cp1252; macOS pone un espacio angosto antes de "p.m."
+        ruta = Path(d) / 'Grabación de pantalla 2026-11-05 a la(s) 7.35.14 p.m. ÁREA ñandú.mp4'
+        shutil.copy(muestra, ruta)
+        import subprocess
+        from editor import config
+        crudo = subprocess.run([config.FFPROBE, '-hide_banner', str(ruta)], capture_output=True).stderr
+        try:
+            crudo.decode('cp1252')        # lo que hacia text=True en Windows
+            assert False, 'el nombre de prueba ya no reproduce la falla'
+        except UnicodeDecodeError:
+            pass
+        assert ffm.sondear(ruta)['duracion'] > 50
+        assert C.cortes_por_minuto(str(ruta), 60.0) >= 0
+
+
 if __name__ == '__main__':
     fallas = 0
     for nombre, fn in list(globals().items()):

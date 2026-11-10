@@ -23,7 +23,7 @@ class ErrorFfmpeg(RuntimeError):
 def correr(args, **kw):
     """ffmpeg con salida de error legible; nunca se queda pidiendo confirmacion."""
     cmd = [config.FFMPEG, '-hide_banner', '-nostdin', '-y', '-loglevel', 'error'] + [str(a) for a in args]
-    r = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace', **kw)
     if r.returncode != 0:
         raise ErrorFfmpeg(f'ffmpeg fallo ({r.returncode}): {r.stderr[-2000:]}\n{" ".join(cmd)[:1500]}')
     return r
@@ -32,7 +32,7 @@ def correr(args, **kw):
 def sondear(ruta):
     r = subprocess.run([config.FFPROBE, '-v', 'error', '-show_entries',
                         'format=duration:format_tags=creation_time:stream=index,codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,sample_rate,channels,pix_fmt:stream_side_data=rotation',
-                        '-of', 'json', str(ruta)], capture_output=True, text=True)
+                        '-of', 'json', str(ruta)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode != 0:
         raise ErrorFfmpeg(f'ffprobe no pudo leer {ruta}: {r.stderr[-500:]}')
     j = json.loads(r.stdout)
@@ -97,7 +97,7 @@ def cuadros(ruta, carpeta, paso, ancho, duracion):
         if solo_clave:
             cmd += ['-skip_frame', 'nokey']
         cmd += ['-i', str(ruta), '-vf', sel, '-fps_mode', 'vfr', '-q:v', '4', str(carpeta / '%05d.jpg')]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if r.returncode != 0:
             raise ErrorFfmpeg(f'ffmpeg no pudo sacar cuadros de {ruta}: {r.stderr[-800:]}')
         return [float(m) for m in re.findall(r'pts_time:\s*([\d.]+)', r.stderr)]
@@ -120,7 +120,7 @@ def duracion(ruta):
 def cuadros_de(ruta):
     """Cuantos cuadros de video tiene un archivo, contando paquetes (no decodifica: es rapido)."""
     r = subprocess.run([config.FFPROBE, '-v', 'error', '-select_streams', 'v:0', '-count_packets', '-show_entries',
-                        'stream=nb_read_packets', '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True)
+                        'stream=nb_read_packets', '-of', 'csv=p=0', str(ruta)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     try:
         return int(r.stdout.strip().split(',')[0])
     except ValueError:
@@ -176,7 +176,7 @@ def ruta_filtro(p):
 def ebur128(ruta):
     """Sonoridad integrada (LUFS) y pico real (dBTP)."""
     cmd = [config.FFMPEG, '-hide_banner', '-nostdin', '-i', str(ruta), '-vn', '-af', 'ebur128=peak=true', '-f', 'null', '-']
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='replace')
     txt = r.stderr
     resumen = txt[txt.rfind('Summary:'):]
     i = tp = None

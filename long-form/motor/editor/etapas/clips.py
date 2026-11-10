@@ -124,7 +124,7 @@ def ass(ctx, srt_ruta, salida, formato, tamano, y):
         from .. import config
         script = config.SUBTITULOS / 'plogy_subtitulos.py'
     r = subprocess.run([sys.executable, str(script), str(srt_ruta), str(salida), '--formato', formato, '--tamano', str(tamano),
-                        '--y', str(y)], capture_output=True, text=True)
+                        '--y', str(y)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     if r.returncode != 0:
         raise RuntimeError(f'subtítulos: {r.stderr[-500:]}')
     return salida
