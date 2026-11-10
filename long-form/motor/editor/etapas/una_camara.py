@@ -1,12 +1,13 @@
 """Etapa 3 (una cámara, y el pódcast ya editado) · Caras, quién habla y reencuadre.
 
 Una sola cámara no trae planos que elegir: se crean recortando el cuadro.
-- Caras en un cuadro cada 2 s (solo se decodifican los cuadros clave: rápido aun en 4K). Como la cámara no se
-  mueve, las caras con la misma posición horizontal son la misma persona.
+- Caras (YuNet, ver caras.py) en un cuadro cada 2 s (solo se decodifican los cuadros clave: rápido aun en 4K).
+  Como la cámara no se mueve, las caras con la misma posición horizontal son la misma persona.
 - Planos: abierto (todo el cuadro), cerrado de cada persona (la cara en el tercio superior, sin ampliar más de
-  1,6 veces para que no se pixele) y, con dos o más personas, el plano de dos.
-- Quién habla, si hay varias: cuánto se mueve la boca de cada una entre dos cuadros seguidos a mitad de cada
-  frase. Si no se sabe, el plano no sigue a nadie: alterna abierto y cerrado.
+  2,2 veces para que no se pixele) y, con dos o más personas, el plano de dos.
+- Quién habla, si hay varias: cuánto se mueve la boca de cada una en 0,8 s a mitad de cada frase, frente a lo
+  que se mueve su cabeza y frente a su propio nivel en todo el video. Si no se sabe, el plano no sigue a nadie:
+  alterna abierto y cerrado.
 - Los cambios de plano caen en los cambios de idea (pausas de 0,7 s o más), con tomas de 7 a 22 s.
 - Un video vertical llena el 16:9 con un recorte alrededor de las caras, o con su propio fondo desenfocado si
   no se ve a nadie.
@@ -16,11 +17,16 @@ video entero, respetando sus cortes.
 """
 import numpy as np
 
-from .. import ffm, tipos
+from .. import config, ffm, tipos
+from ..caras import BOCA, Detector
 from .render import GRADO
 
 PASO = 2.0
 ANCHO_KF = 640
+MIN_CARA = 1 / 50         # caras de al menos 13 px a 640: una persona al fondo de una mesa
+CARA_BOCA = 128           # para ver la boca, la cara más chica tiene que medir al menos esto (o la fuente entera)
+VENTANA_BOCA = 4.0        # segundos que se miran desde el comienzo de cada frase (o la frase entera, si es mas corta)
+FPS_BOCA = 12
 TOMA_MIN, TOMA_MAX = 7.0, 22.0
 PAUSA_IDEA = 0.7
 AMPLIACION_MAX = 2.2      # el recorte nunca se amplia mas que esto sobre la salida (720p ya llega ampliado 1,5)
@@ -35,25 +41,23 @@ def _fuente(ctx):
 
 
 def caras_por_cuadro(ctx, f):
+    """Caras en un cuadro cada 2 s, en píxeles de la fuente. `bocas` va en paralelo a `caras` (None si el
+    detector no la da)."""
     import cv2
     kfs = ffm.cuadros(f['archivo'], ctx.tj(f'cuadros_{f["clave"]}'), PASO, ANCHO_KF, f['duracion'])
-    frontal = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    perfil = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_profileface.xml')
+    det = Detector()
     out = []
     for i, (t, ruta) in enumerate(kfs):
         if i % 60 == 0:
             ctx.avance(f'Buscando caras ({i} de {len(kfs)} cuadros)', .1 + .6 * i / max(len(kfs), 1))
-        g = cv2.imread(str(ruta), 0)
-        if g is None:
+        im = cv2.imread(str(ruta))
+        if im is None:
             continue
-        k = f['ancho'] / g.shape[1]
-        m = g.shape[1] // 30
-        fs = [list(c) for c in frontal.detectMultiScale(g, 1.1, 5, minSize=(m, m))]
-        if not fs:
-            fs = [list(c) for c in perfil.detectMultiScale(g, 1.1, 5, minSize=(m, m))]
-            espejo = perfil.detectMultiScale(cv2.flip(g, 1), 1.1, 5, minSize=(m, m))
-            fs += [[g.shape[1] - x - w, y, w, h] for x, y, w, h in espejo]
-        out.append({'t': float(t), 'kf': str(ruta), 'caras': [[round(float(v) * k, 1) for v in c] for c in fs]})
+        k = f['ancho'] / im.shape[1]
+        cs = det.caras(im, MIN_CARA)
+        out.append({'t': float(t), 'kf': str(ruta), 'caras': [[round(v * k, 1) for v in c['caja']] for c in cs],
+                    'bocas': [[round(v * k, 1) for v in c['boca']] if c['boca'] else None for c in cs]})
+    ctx.log(f'caras con {det.nombre}')
     return out
 
 
@@ -70,8 +74,14 @@ def agrupar(det, W):
     cand = []
     for g in [g for g in grupos if len(g) >= max(3, 0.15 * con_caras)]:
         cx = float(np.median(g))
-        cajas = [c for d in det for c in d['caras'] if abs((c[0] + c[2] / 2) / W - cx) <= 0.08]
-        cand.append({'cx': round(cx, 3), 'caja': [round(float(v), 1) for v in np.median(np.array(cajas), 0)], 'vistas': len(cajas)})
+        suyas = [(c, b) for d in det for c, b in zip(d['caras'], d.get('bocas') or [None] * len(d['caras']))
+                 if abs((c[0] + c[2] / 2) / W - cx) <= 0.08]
+        cajas = [c for c, _ in suyas]
+        # donde cae su boca dentro de la caja: de perfil queda corrida hacia el lado al que mira
+        rel = [((b[0] - c[0]) / c[2], (b[1] - c[1]) / c[3]) for c, b in suyas if b and c[2] > 0 and c[3] > 0]
+        boca = [round(float(v), 3) for v in np.median(np.array(rel), 0)] if rel else list(BOCA)
+        cand.append({'cx': round(cx, 3), 'caja': [round(float(v), 1) for v in np.median(np.array(cajas), 0)],
+                     'boca': boca, 'vistas': len(cajas)})
     # una cara chica que se ve a ratos casi siempre es un cuadro o un reflejo, no una persona: cuenta si se ve
     # en al menos el 30 % de los cuadros o si es de un tamaño parecido a la principal
     grande = max((c['caja'][2] for c in cand), default=0)
@@ -137,8 +147,93 @@ def analizar(ctx):
 
 
 # ---------------------------------------------------------------- quien habla (fin de la transcripcion)
+def tramo_gris(ruta, t, dur, ancho, alto, fps=8):
+    """Los cuadros de [t, t + dur] en gris, a ancho x alto: una sola llamada a ffmpeg. [n, alto, ancho]."""
+    import subprocess
+    p = subprocess.run([config.FFMPEG, '-v', 'error', '-ss', f'{max(t, 0):.3f}', '-i', str(ruta), '-t', f'{dur:.3f}',
+                        '-vf', f'fps={fps},scale={ancho}:{alto},format=gray', '-f', 'rawvideo', '-'], capture_output=True)
+    n = len(p.stdout) // (ancho * alto)
+    return np.frombuffer(p.stdout[:n * ancho * alto], np.uint8).reshape(n, alto, ancho)
+
+
+def caja_en(det, p, t, W):
+    """La caja de la persona en el cuadro analizado mas cercano a t (se mueve al hablar), o None si en esos 3 s
+    no se le vio la cara (se giro, se tapo): sin cara no se mide su boca."""
+    mejor = None
+    for d in det:
+        if abs(d['t'] - t) > 3.0:
+            continue
+        for c in d['caras']:
+            if abs((c[0] + c[2] / 2) / W - p['cx']) <= 0.08 and (mejor is None or abs(d['t'] - t) < mejor[0]):
+                mejor = (abs(d['t'] - t), c)
+    return mejor[1] if mejor else None
+
+
+def voz_a_persona(voz, medidas, ids, margen=0.25, minimo=3):
+    """A cada voz (grupo de frases que suenan igual, voces.py), la persona cuya boca mas se mueve en el conjunto
+    de sus frases. `voz`: {frase: grupo}; `medidas`: {frase: [movimiento de la boca por persona]}.
+
+    Frase por frase la boca engaña (quien escucha asiente, se rie, come), pero en el conjunto de las frases de
+    una voz, la boca de quien la dice se mueve mas que la de los demas. Cada persona se mide contra si misma (su
+    media y su dispersion en todas las frases), para que una cara mas grande o con mas textura no gane por eso.
+    Una voz cuyas frases medidas son menos de `minimo`, o donde nadie sobresale por `margen`, queda sin persona.
+    Varias voces pueden ser de la misma persona (el agrupamiento a veces parte una voz en dos)."""
+    if not medidas:
+        return {}
+    filas = sorted(medidas)
+    m = np.array([medidas[i] for i in filas], dtype=float)
+    z = (m - np.nanmean(m, 0)) / (np.nanstd(m, 0) + 1e-6)
+    out = {}
+    for g in sorted({v for v in voz.values() if v is not None and v >= 0}):
+        sel = [j for j, i in enumerate(filas) if voz.get(i) == g]
+        if len(sel) < minimo:
+            continue
+        media = np.nanmean(z[sel], 0)
+        orden = [k for k in np.argsort(-np.nan_to_num(media, nan=-9))]
+        if len(orden) > 1 and media[orden[0]] - np.nan_to_num(media[orden[1]], nan=-9) >= margen:
+            out[g] = ids[orden[0]]
+    return out
+
+
+def movimiento_boca(cuadros, cajas, bocas, k):
+    """Por persona: cuanto se mueve su boca entre cuadros seguidos, mas alla de lo que se mueve su cabeza.
+    `cuadros`: [n, alto, ancho] en gris; cajas y bocas en pixeles de la fuente; k = ancho leido / ancho fuente."""
+    import cv2
+    _, H, W = cuadros.shape
+    out = []
+    for caja, (bx, by) in zip(cajas, bocas):
+        if caja is None:
+            out.append(float('nan'))
+            continue
+        x, y, w, h = [v * k for v in caja]
+        # cada cuadro se alinea con el primero por la cara (correlacion de fase): lo que se desplaza la cabeza
+        # deja de contar y queda lo que se mueve la boca dentro de la cara
+        m = 0.25
+        x0, x1 = int(max(x - w * m, 0)), int(min(x + w * (1 + m), W))
+        y0, y1 = int(max(y - h * m, 0)), int(min(y + h * (1 + m), H))
+        if x1 - x0 < 16 or y1 - y0 < 16:
+            out.append(float('nan'))
+            continue
+        caras = [c[y0:y1, x0:x1].astype(np.float32) for c in cuadros]
+        ventana = cv2.createHanningWindow((x1 - x0, y1 - y0), cv2.CV_32F)
+        alineadas = [caras[0]]
+        for c in caras[1:]:
+            (dx, dy), _ = cv2.phaseCorrelate(alineadas[-1], c, ventana)
+            alineadas.append(cv2.warpAffine(c, np.float32([[1, 0, -dx], [0, 1, -dy]]), (x1 - x0, y1 - y0),
+                                            borderMode=cv2.BORDER_REPLICATE))
+        d = np.abs(np.diff(np.array(alineadas), axis=0)).mean(0)
+        mx, my = x + bx * w - x0, y + by * h - y0
+        boca = d[int(max(my - h * 0.16, 0)):int(my + h * 0.16), int(max(mx - w * 0.28, 0)):int(mx + w * 0.28)]
+        out.append(float(boca.mean()) if boca.size else float('nan'))
+    return out
+
+
 def hablantes(ctx, segs, maximo=240):
-    """Con una persona, es ella. Con varias, la boca que mas se mueve a mitad de cada frase."""
+    """Con una persona, es ella. Con varias: las frases se agrupan por voz (voces.py), en cada frase se mide
+    cuanto se mueve la boca de cada persona (hasta 4 s a 12 cuadros por segundo, con la cara a no menos de 128
+    px y alineada para que no cuente el movimiento de la cabeza), y cada voz va a la persona cuya boca mas se
+    mueve en el conjunto de sus frases (voz_a_persona)."""
+    from .. import voces
     an = ctx.estado['analisis']
     ps = an['personas']
     if len(ps) < 2:
@@ -146,40 +241,47 @@ def hablantes(ctx, segs, maximo=240):
             s['hablante'] = ps[0]['id'] if ps else None
         return
     f = _fuente(ctx)
-    k = 480 / f['ancho']
+    det = ctx.json_trabajo('caras.json')
+    chica = min(p['caja'][2] for p in ps) / f['ancho']
+    ancho = int(min(f['ancho'], 1920, max(480, CARA_BOCA / max(chica, 1e-3)))) & ~1
+    alto = int(f['alto'] * ancho / f['ancho']) & ~1
+    k = ancho / f['ancho']
     cand = [i for i, s in enumerate(segs) if s['fin'] - s['inicio'] >= 1.2]
     if len(cand) > maximo:
         cand = [cand[int(j)] for j in np.linspace(0, len(cand) - 1, maximo)]
-    vistos = {}
+    vistos, medidas = {}, {}
     for n, i in enumerate(cand):
         if n % 40 == 0:
             ctx.avance(f'Viendo quién habla ({n} de {len(cand)} frases)', .9)
         s = segs[i]
-        t = an['inicio'] + (s['inicio'] + s['fin']) / 2
-        a, b = ffm.cuadro(f['archivo'], t, 480, gris=True), ffm.cuadro(f['archivo'], t + 0.2, 480, gris=True)
-        if a is None or b is None or a.shape != b.shape:
+        a = an['inicio'] + s['inicio']
+        dura = min(s['fin'] - s['inicio'], VENTANA_BOCA)
+        cuadros = tramo_gris(f['archivo'], a, dura, ancho, alto, fps=FPS_BOCA)
+        if len(cuadros) < 6:
             continue
-        d = np.abs(a.astype(np.int16) - b.astype(np.int16))
-        mov = []
-        for p in ps:
-            x, y, w, h = [v * k for v in p['caja']]
-            boca = d[int(y + h * 0.62):int(y + h * 1.05), int(x + w * 0.2):int(x + w * 0.8)]
-            frente = d[int(y):int(y + h * 0.4), int(x + w * 0.2):int(x + w * 0.8)]
-            # lo que se mueve la boca mas alla de lo que se mueve la cabeza entera
-            mov.append(float(boca.mean() - 0.6 * frente.mean()) if boca.size and frente.size else 0.0)
-        orden = np.argsort(mov)[::-1]
-        if mov[orden[0]] >= 1.0 and mov[orden[0]] >= 1.3 * max(mov[orden[1]], 0.3):
-            vistos[i] = ps[int(orden[0])]['id']
-    claves = sorted(vistos)
+        mov = movimiento_boca(cuadros, [caja_en(det, p, a + dura / 2, f['ancho']) for p in ps], [p.get('boca') or BOCA for p in ps], k)
+        medidas[i] = mov
+    ctx.avance('Agrupando las frases por voz', .9)
+    _, audio = ffm.leer_wav(tipos.programa(ctx))
+    huellas = [voces.huella(audio[int(s['inicio'] * voces.SR):int(s['fin'] * voces.SR)]) for s in segs]
+    grupos = voces.agrupar(huellas, len(ps))
+    voz = {i: g for i, g in enumerate(grupos)}
+    de_voz = voz_a_persona(voz, medidas, [p['id'] for p in ps])
+    ctx.json_trabajo('bocas.json', {'ancho': ancho, 'personas': [p['id'] for p in ps],
+                                    'medidas': {str(i): [None if np.isnan(v) else round(v, 2) for v in m] for i, m in medidas.items()},
+                                    'voz': grupos, 'voz_persona': {str(g): p for g, p in de_voz.items()}})
     for i, s in enumerate(segs):
-        if i in vistos:
-            s['hablante'] = vistos[i]
-            continue
-        # sin medida: el de la frase medida mas cercana, si esta a menos de 20 s
-        j = min(claves, key=lambda c: abs(segs[c]['inicio'] - s['inicio']), default=None)
-        s['hablante'] = vistos[j] if j is not None and abs(segs[j]['inicio'] - s['inicio']) < 20 else None
-    ctx.log(f'quién habla: medido en {len(vistos)} de {len(cand)} frases; ' +
-            ', '.join(f'{p["id"]} {sum(1 for s in segs if s.get("hablante") == p["id"])}' for p in ps))
+        s['hablante'] = de_voz.get(voz[i])
+    # una frase sin voz reconocible (muy corta) o de una voz sin persona: la de la frase vecina con persona, si
+    # esta a menos de 3 s (una respuesta corta no se separa de su frase)
+    con = [i for i, s in enumerate(segs) if s['hablante']]
+    for i, s in enumerate(segs):
+        if s['hablante'] is None and con:
+            j = min(con, key=lambda c: abs(segs[c]['inicio'] - s['inicio']))
+            if abs(segs[j]['inicio'] - s['inicio']) < 3:
+                s['hablante'] = segs[j]['hablante']
+    ctx.log(f'quién habla: {len(set(g for g in grupos if g >= 0))} voces, {len(de_voz)} con cara; boca medida en '
+            f'{len(medidas)} frases; ' + ', '.join(f'{p["id"]} {sum(1 for s in segs if s.get("hablante") == p["id"])}' for p in ps))
 
 
 def reparto(ctx, segs, tipo):

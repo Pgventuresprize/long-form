@@ -77,7 +77,13 @@ class Laminas:
     def __init__(self, rutas):
         import cv2
         self.cv2 = cv2
-        self.paginas = [cv2.imread(str(p), 0) for p in rutas]
+        # cada pagina se reduce una vez a 480 de ancho y de ahi salen todos los tamaños (desde el PNG grande, 40
+        # paginas a 35 tamaños tardaban casi un minuto)
+        self.paginas = []
+        for p in rutas:
+            g = cv2.imread(str(p), 0)
+            self.paginas.append(cv2.resize(g, (480, round(480 * g.shape[0] / g.shape[1])), interpolation=cv2.INTER_AREA)
+                                if g.shape[1] > 480 else g)
         h0, w0 = self.paginas[0].shape
         self.ar = h0 / w0
         # ancho de la lamina en un cuadro reducido a 480: hasta el cuadro entero (una proyeccion grabada de frente
@@ -85,26 +91,59 @@ class Laminas:
         self.anchos = list(range(140, 490, 10))
         self.tpl = {w: [cv2.resize(p, (w, round(w * self.ar)), interpolation=cv2.INTER_AREA) for p in self.paginas]
                     for w in self.anchos}
+        # la busqueda gruesa: a la mitad de resolucion, un tamaño de cada tres
+        self.tpl2 = {w: [cv2.resize(t, (w // 2, max(1, round(w * self.ar / 2))), interpolation=cv2.INTER_AREA) for t in ts]
+                     for w, ts in self.tpl.items() if w in self.anchos[::3]}
         self.cur = None
+        self.prev = None
 
-    def _score(self, fr, pag, w):
-        t = self.tpl[w][pag]
+    @staticmethod
+    def _match(cv2, fr, t):
         if t.std() < 2 or t.shape[0] > fr.shape[0] or t.shape[1] > fr.shape[1]:
             return -1, None
-        r = self.cv2.matchTemplate(fr, t, self.cv2.TM_CCOEFF_NORMED)
-        _, v, _, loc = self.cv2.minMaxLoc(r)
+        r = cv2.matchTemplate(fr, t, cv2.TM_CCOEFF_NORMED)
+        _, v, _, loc = cv2.minMaxLoc(r)
         return v, loc
 
+    def _score(self, fr, pag, w):
+        return self._match(self.cv2, fr, self.tpl[w][pag])
+
     def buscar(self, gris):
-        fr = self.cv2.resize(gris, (480, round(480 * gris.shape[0] / gris.shape[1])), interpolation=self.cv2.INTER_AREA)
+        cv2 = self.cv2
+        fr = cv2.resize(gris, (480, round(480 * gris.shape[0] / gris.shape[1])), interpolation=cv2.INTER_AREA)
+        # el mismo cuadro que el anterior (la lamina quieta mientras se habla): el mismo resultado
+        if self.prev is not None and self.prev[0].shape == fr.shape and float(cv2.absdiff(fr, self.prev[0]).mean()) < 1.5:
+            return self.prev[1]
         mejor = (-1, None, None, None)
         if self.cur:
-            v, loc = self._score(fr, *self.cur)
-            if v > 0.8:
-                mejor = (v, self.cur[0], self.cur[1], loc)
+            # la lamina de antes, la siguiente o la anterior (avanzan de a una), al mismo tamaño. Vale si supera 0,8
+            # o si su puntaje no cayo de golpe (una lamina tapada en parte puntua parejo mas bajo, y buscar en todo
+            # el PDF en cada cuadro es lo que hacia lento el analisis)
+            p0, w0, v0 = self.cur
+            for p in (p0, p0 + 1, p0 - 1):
+                if 0 <= p < len(self.paginas):
+                    v, loc = self._score(fr, p, w0)
+                    if v > mejor[0]:
+                        mejor = (v, p, w0, loc)
+            vale = lambda m: m[0] > 0.8 or (m[0] > UMBRAL_LAMINA and m[0] >= v0 - 0.06)  # noqa: E731
+            if not vale(mejor):
+                # la misma lamina a otro tamaño (Meet cambia el diseño al entrar o salir alguien)
+                for w in self.anchos:
+                    v, loc = self._score(fr, p0, w)
+                    if v > mejor[0]:
+                        mejor = (v, p0, w, loc)
+            if not vale(mejor):
+                mejor = (-1, None, None, None)
         if mejor[1] is None:
-            for w in self.anchos[::3]:
-                for p in range(len(self.paginas)):
+            # gruesa a media resolucion para quedarse con tres paginas; esas tres, a resolucion completa
+            fr2 = cv2.resize(fr, (fr.shape[1] // 2, fr.shape[0] // 2), interpolation=cv2.INTER_AREA)
+            grueso = {}
+            for w, ts in self.tpl2.items():
+                for p, t in enumerate(ts):
+                    v, _ = self._match(cv2, fr2, t)
+                    grueso[p] = max(grueso.get(p, -1), v)
+            for p in sorted(grueso, key=grueso.get, reverse=True)[:3]:
+                for w in self.anchos[::3]:
                     v, loc = self._score(fr, p, w)
                     if v > mejor[0]:
                         mejor = (v, p, w, loc)
@@ -113,8 +152,10 @@ class Laminas:
                     v, loc = self._score(fr, mejor[1], w)
                     if v > mejor[0]:
                         mejor = (v, mejor[1], w, loc)
-        self.cur = (mejor[1], mejor[2]) if mejor[0] > UMBRAL_LAMINA else None
-        return (mejor[1] + 1, round(float(mejor[0]), 3)) if mejor[0] > UMBRAL_LAMINA else (None, round(float(mejor[0]), 3))
+        self.cur = (mejor[1], mejor[2], mejor[0]) if mejor[0] > UMBRAL_LAMINA else None
+        res = (mejor[1] + 1, round(float(mejor[0]), 3)) if mejor[0] > UMBRAL_LAMINA else (None, round(float(mejor[0]), 3))
+        self.prev = (fr, res)
+        return res
 
 
 def escanear(ctx, info):

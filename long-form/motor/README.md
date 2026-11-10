@@ -57,6 +57,23 @@ Para todos los tipos (`tipos.py`):
 Cada tipo responde las mismas preguntas en `tipos.py` (análisis, audio del programa, reparto, tomas, quién habla,
 compositor): las etapas no ramifican por tipo.
 
+**Caras** (`caras.py`): YuNet, el detector de OpenCV, con su modelo en `modelos/` (licencia MIT, de
+[opencv_zoo](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)). Ve caras de frente y de
+perfil, chicas y lejanas, y da las comisuras de la boca. Si falta el modelo, usa Haar, que ve menos.
+
+**Quién habla en una cámara con varias personas** (`una_camara.hablantes`):
+1. Las frases se agrupan por voz (`voces.py`: timbre en MFCC y agrupamiento jerárquico). Así se sabe qué frases
+   dice la misma persona, sin saber quién es.
+2. En cada frase se mide cuánto se mueve la boca de cada persona: hasta 4 s a 12 cuadros por segundo, con la cara
+   a no menos de 128 px y alineada cuadro a cuadro para que no cuente el movimiento de la cabeza.
+3. Cada voz va a la persona cuya boca más se mueve en el conjunto de sus frases, si sobresale con claridad.
+
+Frase por frase, la boca sola acierta poco: quien escucha asiente y se ríe. Una voz sin persona clara queda sin
+nadie, y el video no sigue a nadie en esas frases. Una persona de espaldas o tapada no se mide.
+
+**Desempate con Claude** (`clasificar.desempatar`): cuatro cuadros, cada uno con su minuto delante, y solo los
+tipos que dejaron las reglas. Si Claude no está, falla o responde otro tipo, queda la regla y la evidencia lo dice.
+
 Cada etapa deja en `lf_eventos` su duración y su costo:
 - segundos;
 - núcleos;
@@ -119,5 +136,11 @@ Después, en Vercel: `LF_MOTOR=modal`, `LF_MOTOR_URL=<url de despertar>` y `LF_M
   que reconozca cada tipo; `todo` lo lleva hasta el control de calidad. Las muestras las arma
   `tests/armar_muestras.py` con recortes de grabaciones reales (las rutas van por variables de entorno) y dos
   videos generados (láminas y pantalla).
+- **`tests/prueba_desempate.py`:** el desempate con Claude contra un Studio falso: lo que se pide y qué pasa con
+  cada respuesta (elige, sin clave, error, tipo fuera de los candidatos).
+- **`tests/prueba_quien_habla.py`:** quién habla por la boca contra una respuesta conocida. Pone lado a lado las dos
+  cámaras de una charla, cada una con su micrófono, y compara frase por frase con lo que dicen los micrófonos.
+- **`tests/prueba_hora.py`:** una hora por tipo, de punta a punta en Rápido. Deja el tiempo por etapa y la memoria
+  máxima en `medida.json`.
 - **`scripts/longform-cola.test.ts`:** prueba la cola contra el Supabase local.
 - **De punta a punta:** con `scripts/longform-proyecto-prueba.ts` y el motor corriendo.

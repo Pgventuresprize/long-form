@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
-import { llamarClaude, parsearJSONDeClaude, type Bloque } from "@/engine/claude/messages"
+import { llamarClaude, parsearJSONDeClaude } from "@/engine/claude/messages"
 import { tieneFuncion } from "@/engine/funciones"
+import { armarPedido, type BloqueMotor } from "@/engine/long-form/ia-pedido"
 import { cuentaDelProyecto, esElMotor } from "@/engine/long-form/motor"
 
 export const dynamic = "force-dynamic"
@@ -14,13 +15,11 @@ type Pedido = {
   proyecto_id: string
   paso?: string
   sistema: string
-  contenido: ({ type: "text"; text: string } | { type: "image"; source: { type: "base64"; media_type: string; data: string } })[]
+  contenido: BloqueMotor[]
   esquema: { required?: string[] } & Record<string, unknown>
   max_tokens?: number
   modelo?: string | null
 }
-
-const IMAGENES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const
 
 /**
  * Los pasos de Claude del motor de long form (nombres, guion, ideas, clips). El motor arma el pedido y
@@ -40,18 +39,13 @@ export async function POST(request: Request) {
   const accountId = await cuentaDelProyecto(p.proyecto_id)
   if (!accountId || !(await tieneFuncion(accountId, "long_form"))) return NextResponse.json({ ok: false }, { status: 404 })
 
-  const textos = p.contenido.filter((b) => b.type === "text").map((b) => (b as { text: string }).text)
-  const bloques: Bloque[] = p.contenido.flatMap((b): Bloque[] =>
-    b.type === "image" && (IMAGENES as readonly string[]).includes(b.source.media_type)
-      ? [{ tipo: "imagen", mime: b.source.media_type as (typeof IMAGENES)[number], datos: Buffer.from(b.source.data, "base64") }]
-      : []
-  )
+  const { prompt: base, bloques } = armarPedido(p.contenido)
   const sistema =
     `${p.sistema}\n\nResponde SOLO con un objeto JSON, sin texto antes ni despues y sin bloque de codigo, ` +
     `que cumpla este esquema JSON:\n${JSON.stringify(p.esquema)}`
   const requeridos = p.esquema.required ?? []
 
-  let prompt = textos.join("\n\n")
+  let prompt = base
   const uso = { entrada: 0, salida: 0 }
   for (let intento = 0; intento < 2; intento++) {
     const r = await llamarClaude({
@@ -59,7 +53,7 @@ export async function POST(request: Request) {
       model: p.modelo || MODELO,
       system: sistema,
       prompt,
-      bloques: bloques.length ? bloques : undefined,
+      bloques,
       maxTokens: Math.min(Math.max(p.max_tokens ?? 8000, 1000), 32000),
       timeoutMs: 280_000,
       paso: p.paso ?? "longform",
@@ -77,7 +71,7 @@ export async function POST(request: Request) {
       if (!datos || typeof datos !== "object" || faltan.length) throw new Error(`faltan campos: ${faltan.join(", ")}`)
       return NextResponse.json({ ok: true, datos, uso })
     } catch (e) {
-      prompt = `${textos.join("\n\n")}\n\nTu respuesta anterior no se pudo usar (${e instanceof Error ? e.message : String(e)}). Devuelve solo el JSON completo.`
+      prompt = `${base}\n\nTu respuesta anterior no se pudo usar (${e instanceof Error ? e.message : String(e)}). Devuelve solo el JSON completo.`
     }
   }
   return NextResponse.json({ ok: false, error: "Claude no devolvió el JSON pedido." }, { status: 502 })

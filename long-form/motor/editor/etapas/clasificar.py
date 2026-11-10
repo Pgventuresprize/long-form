@@ -205,8 +205,9 @@ def senales(ctx, f, laminas=None):
     """Lo que se mide de una pista. Devuelve el resumen y los cuadros (para el desempate)."""
     import cv2
 
+    from ..caras import Detector
     from .meet import caja_azul
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    det = Detector()
     dur = f['duracion']
     caras, maxc, borde, fondo, plano, lam = [], [], [], [], [], []
     vistos = []
@@ -216,7 +217,7 @@ def senales(ctx, f, laminas=None):
             continue
         vistos.append((t, im))
         gris = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-        fs = det.detectMultiScale(gris, 1.1, 5, minSize=(ANCHO // 28, ANCHO // 28))
+        fs = det.caras(im, 1 / 28)
         caras.append(len(fs) > 0)
         maxc.append(len(fs))
         borde.append(caja_azul(im) is not None)
@@ -323,9 +324,11 @@ def desempatar(ctx, candidatos, vistos, s):
         bloques += [{'type': 'text', 'text': f'Minuto {t / 60:.1f}:'}, ia.imagen(p)]
     esquema = {'type': 'object', 'required': ['tipo', 'porque'], 'properties': {
         'tipo': {'type': 'string', 'enum': list(candidatos)}, 'porque': {'type': 'string'}}}
-    r = ia.pedir_json('Clasificas grabaciones de video para editarlas. Responde solo con lo que se ve en los cuadros.',
-                      bloques, esquema, 'clasificar', max_tokens=400)
-    return r['tipo'], r['porque']
+    r = ia.pedir_json('Clasificas grabaciones de video para editarlas. Responde solo con lo que se ve en los cuadros. '
+                      'En "porque" explica en una oración, en español y para quien grabó, qué se ve que lo decide.',
+                      bloques, esquema, 'clasificar', max_tokens=400, intentos=1)
+    porque = str(r.get('porque') or '').strip().rstrip('.')
+    return r['tipo'], porque[:300]
 
 
 # ---------------------------------------------------------------- etapa
@@ -370,7 +373,7 @@ def correr(ctx):
     for i, f in enumerate(pistas):
         ctx.avance(f'Mirando el video {f["clave"]}', .3 + .55 * i / len(pistas))
         if lam is not None:
-            lam.cur = None
+            lam.cur = lam.prev = None
         sen[f['clave']], vistos[f['clave']] = senales(ctx, f, lam)
         ctx.log(f'{f["clave"]}: {sen[f["clave"]]}')
 
@@ -387,11 +390,16 @@ def correr(ctx):
         try:
             k = pistas[0]['clave']
             elegido, porque = desempatar(ctx, candidatos, vistos[k], sen[k])
-            if elegido in candidatos:
+            if elegido not in candidatos:
+                razones.append('Claude no dio una respuesta usable para desempatar: se usa la regla. Si no es este tipo, cámbialo al revisar.')
+            else:
                 tipo, por_ia = elegido, True
-                razones.append(f'La IA miró los cuadros y eligió «{tipos.NOMBRES[elegido]}»: {porque}')
+                razones.append(f'La IA miró los cuadros y eligió «{tipos.NOMBRES[elegido]}»' + (f': {porque}.' if porque else '.'))
         except ia.SinIA:
             razones.append('Sin clave de Claude para desempatar: se usa la regla. Si no es este tipo, cámbialo al revisar.')
+        except Exception as e:  # noqa: BLE001  el desempate es una ayuda: si Claude falla, queda la regla
+            ctx.log(f'desempate con Claude falló: {type(e).__name__}: {e}')
+            razones.append('Claude no respondió para desempatar: se usa la regla. Si no es este tipo, cámbialo al revisar.')
     if tipo in ('charla', 'pantalla') and not roles.get('contenido'):
         roles['contenido'] = pistas[0]['clave']
     if tipo in ('charla', 'pantalla') and 'camara' not in roles:

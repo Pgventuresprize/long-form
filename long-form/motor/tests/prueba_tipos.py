@@ -104,6 +104,43 @@ def prueba_una_camara():
     assert enc['W'][0] == 1080 and abs(enc['W'][0] / enc['W'][1] - 16 / 9) < 0.02
 
 
+def prueba_voz_a_persona():
+    nan = float('nan')
+    # p2 siempre mueve mas la boca (cara mas grande, se rie al escuchar): eso no la hace duena de todas las voces
+    medidas = {}
+    voz = {}
+    for i in range(30):
+        habla_p1 = i % 3 != 0
+        medidas[i] = [5.0 + (i % 2), 6.0] if habla_p1 else [2.5, 11.0 + (i % 2)]
+        voz[i] = 0 if habla_p1 else 1
+    medidas[4] = [nan, 6.0]                   # a p1 no se le vio la cara en esa frase
+    voz[30] = 2                               # una voz con una sola frase: sin persona
+    medidas[30] = [9.0, 1.0]
+    assert una_camara.voz_a_persona(voz, medidas, ['p1', 'p2']) == {0: 'p1', 1: 'p2'}
+    # dos grupos que son la misma voz partida: los dos van a la misma persona
+    voz2 = {i: (3 if (v == 0 and i % 2) else v) for i, v in voz.items()}
+    r = una_camara.voz_a_persona(voz2, medidas, ['p1', 'p2'])
+    assert r[0] == 'p1' and r[3] == 'p1' and r[1] == 'p2', r
+    assert una_camara.voz_a_persona({}, {}, ['p1', 'p2']) == {}
+
+
+def prueba_voces():
+    import numpy as np
+    from editor import voces
+    rng = np.random.default_rng(1)
+    t = np.arange(int(voces.SR * 2.0)) / voces.SR
+
+    def voz(f0, brillo):
+        # una "voz": armonicos de f0 con su propia envolvente espectral, y algo de ruido
+        x = sum(np.sin(2 * np.pi * f0 * k * t) * brillo ** k for k in range(1, 15))
+        return (x * (0.6 + 0.4 * np.sin(2 * np.pi * 3 * t)) + 0.05 * rng.standard_normal(len(t))).astype(np.float32)
+    hs = [voces.huella(voz(110 * (1 + 0.03 * rng.standard_normal()), 0.85)) for _ in range(8)]
+    hs += [voces.huella(voz(220 * (1 + 0.03 * rng.standard_normal()), 0.55)) for _ in range(6)]
+    hs.append(voces.huella(np.zeros(1000, np.float32)))      # demasiado corto: sin huella
+    e = voces.agrupar(hs, 2)
+    assert e[-1] == -1 and len(set(e[:8])) == 1 and len(set(e[8:14])) == 1 and e[0] != e[8], e
+
+
 def prueba_pantalla():
     c = contenido._caja_16x9([800, 500, 100, 40], 1920, 1080)
     cw, ch, x, y = c

@@ -139,13 +139,42 @@ Son las cosas que cambian el trabajo o que cuestan dinero. Va mi recomendación 
   - un video de una cámara llega a quién es quién con su tipo y la evidencia;
   - "¿No es este?" lo corrige a pódcast: vuelve a analizar, reutiliza la transcripción y termina el video.
 
-- **Lo que no quedó probado:**
-  - El desempate con Claude (las pruebas corren sin clave).
-  - Quién habla por la boca con varias personas: en la muestra del café solo una mira a la cámara; las otras
-    están de perfil o de espaldas y OpenCV no las ve. Un detector mejor (YuNet) necesita un modelo aparte.
-  - Videos de una hora por tipo: las muestras son de 1 a 2,5 minutos.
-  - Clasificar cuesta entre 20 s y 2,5 min por proyecto en esta máquina. Lo caro es buscar láminas del PDF,
-    acotado a 8 cuadros y 5 coincidencias.
+- **Lo que no quedó probado en la fase 5** se resolvió antes de unir a main (2026-11-10, abajo).
+
+**Antes de unir a main (2026-11-10), en local:**
+- **Desempate con Claude.** Se prueba contra un Studio falso (`tests/prueba_desempate.py`): cuatro cuadros, cada uno
+  con su minuto delante, y Claude solo puede elegir entre los tipos que dejaron las reglas. Con cada respuesta:
+  - elige un tipo: se usa y su razón queda en la evidencia;
+  - la cuenta no tiene Claude (409), Studio falla (502) o elige un tipo fuera de los candidatos: queda la regla y
+    la evidencia lo dice.
+
+  Dos fallas encontradas:
+  - En Studio (`/api/long-form/ia`), las imágenes llegaban a Claude separadas de sus textos ("Minuto 3,2:"): ahora
+    van en orden (`src/engine/long-form/ia-pedido.ts`, con prueba).
+  - En el motor, un error de Studio tumbaba la etapa en vez de quedarse con la regla.
+
+  La llamada real a Claude necesita una clave en la cuenta. En local no hay; se prueba al encender la beta.
+- **Caras: YuNet** (el detector de OpenCV, modelo de 230 KB en `long-form/motor/modelos`, licencia MIT) en una
+  cámara, clasificar y cámaras. En el café ve a las tres personas en 38 de 38 cuadros; Haar veía una. Los ocho
+  casos de la fase 5 siguen reconociendo su tipo.
+- **Quién habla en una cámara con varias personas.** Se midió contra una respuesta conocida
+  (`tests/prueba_quien_habla.py`): las dos cámaras de César y María Lucía puestas lado a lado en un solo cuadro,
+  con lo que dicen sus micrófonos como verdad, en 10 minutos y 84 frases.
+
+  | Método | Acierta |
+  |---|---|
+  | Decir siempre la persona que más habla (referencia) | 79 % |
+  | La boca que más se mueve, frase por frase (el de la fase 5, y variantes) | 40 % a 79 % |
+  | **Voz primero:** agrupar las frases por timbre y dar cada voz a la cara cuya boca más se mueve en el conjunto de sus frases | **100 % (84 de 84; las 18 de la persona que habla menos)** |
+
+  Frase por frase la boca engaña: quien escucha asiente, se ríe y mueve la boca. Ahora las frases se agrupan por
+  voz (`long-form/motor/editor/voces.py`, MFCC y agrupamiento jerárquico, sin modelos) y la boca solo decide de
+  quién es cada voz.
+
+  En el café (tres personas de perfil, risas) no le asigna cara a ninguna voz con seguridad: el video no sigue a
+  nadie y la revisión lo avisa, en vez de seguir a alguien por error.
+- **Láminas 5 veces más rápido:** se reusa el resultado si el cuadro no cambió, se prueban primero la lámina
+  actual y sus vecinas, y la búsqueda completa va en dos resoluciones. Mismo resultado en el taller.
 
 ### Decisiones tomadas (2026-11-08)
 

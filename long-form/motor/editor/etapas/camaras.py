@@ -192,7 +192,8 @@ def encuadres(ruta, dur, info, n=24):
     import cv2
 
     from .. import config
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    from ..caras import Detector
+    det = Detector()
     W, H = info['ancho'], info['alto']
     caras = []
     color = []
@@ -202,8 +203,10 @@ def encuadres(ruta, dur, info, n=24):
         if len(p.stdout) < W * H * 3:
             continue
         bgr = np.frombuffer(p.stdout[:W * H * 3], np.uint8).reshape(H, W, 3)
-        im = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        fs = det.detectMultiScale(im, 1.1, 5, minSize=(W // 16, W // 16))
+        # se busca a 960 px (YuNet a 4K es lento y no ve mas) y se vuelve a la escala de la fuente
+        k = min(1.0, 960 / W)
+        chico = cv2.resize(bgr, (int(W * k), int(H * k)), interpolation=cv2.INTER_AREA) if k < 1 else bgr
+        fs = [[int(v / k) for v in c['caja']] for c in det.caras(chico, 1 / 16)]
         if len(fs):
             x, y, w, h = max(fs, key=lambda f: f[2] * f[3])
             caras.append((x + w / 2, y + h / 2, w))

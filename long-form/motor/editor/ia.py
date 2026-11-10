@@ -71,7 +71,8 @@ def pedir_json(sistema, contenido, esquema, nombre='respuesta', modelo=None, max
             raise
         except Exception as e:  # noqa: BLE001
             err = e
-            time.sleep(4 * (i + 1))
+            if i + 1 < intentos:
+                time.sleep(4 * (i + 1))
     raise RuntimeError(f'Claude no respondio bien tras {intentos} intentos: {err}')
 
 
