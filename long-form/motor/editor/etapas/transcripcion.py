@@ -6,6 +6,7 @@ texto inicial que trae los nombres propios del proyecto, para que Whisper los es
 Al terminar se arma la propuesta de reparto que la persona aprueba en la app (aprobación 1).
 """
 import json
+import time
 
 import numpy as np
 
@@ -13,6 +14,7 @@ from .. import config, ffm, ia
 from .. import tipos
 
 PARTE = 600.0
+INTENTOS = 4
 
 
 def _modelo():
@@ -40,20 +42,30 @@ def _groq_parte(ctx, wav, i, a, d):
         return json.loads(out.read_text(encoding='utf8'))
     parte = d / f'p{i:02d}.flac'
     ffm.correr(['-ss', f'{a:.3f}', '-t', f'{PARTE:.3f}', '-i', wav, '-ac', '1', '-ar', '16000', '-c:a', 'flac', parte])
-    for intento in range(4):
-        with open(parte, 'rb') as f:
-            r = requests.post('https://api.groq.com/openai/v1/audio/transcriptions', timeout=300,
-                              headers={'Authorization': f'Bearer {config.GROQ_API_KEY}'},
-                              files={'file': (parte.name, f, 'audio/flac')},
-                              data=[('model', config.GROQ_MODELO), ('response_format', 'verbose_json'),
-                                    ('language', ctx.spec.get('idioma', 'es')), ('prompt', prompt_inicial(ctx)[:600]),
-                                    ('timestamp_granularities[]', 'word'), ('timestamp_granularities[]', 'segment')])
-        if r.status_code == 429 or r.status_code >= 500:
-            import time
+    error = ''
+    for intento in range(INTENTOS):
+        try:
+            with open(parte, 'rb') as f:
+                r = requests.post('https://api.groq.com/openai/v1/audio/transcriptions', timeout=300,
+                                  headers={'Authorization': f'Bearer {config.GROQ_API_KEY}'},
+                                  files={'file': (parte.name, f, 'audio/flac')},
+                                  data=[('model', config.GROQ_MODELO), ('response_format', 'verbose_json'),
+                                        ('language', ctx.spec.get('idioma', 'es')), ('prompt', prompt_inicial(ctx)[:600]),
+                                        ('timestamp_granularities[]', 'word'), ('timestamp_granularities[]', 'segment')])
+        except requests.RequestException as e:
+            error = f'sin respuesta de Groq ({e.__class__.__name__})'
+        else:
+            if r.status_code != 429 and r.status_code < 500:
+                r.raise_for_status()        # un 4xx (clave, archivo) no mejora reintentando
+                break
+            error = f'Groq respondió {r.status_code}'
+        if intento < INTENTOS - 1:
             time.sleep(3 * (intento + 1))
-            continue
-        r.raise_for_status()
-        break
+    else:
+        # Antes la parte quedaba guardada vacía y en caché: el video salía sin ese tramo y sin aviso.
+        # Ahora la etapa falla, la cola la reintenta y las partes ya hechas no se repiten.
+        raise RuntimeError(f'No se pudo transcribir el tramo {int(a // 60)}–{int((a + PARTE) // 60)} min: '
+                           f'{error} tras {INTENTOS} intentos')
     j = r.json()
     palabras = [{'p': w['word'].strip(), 'i': round(w['start'] + a, 2), 'f': round(w['end'] + a, 2)} for w in j.get('words') or []]
     res = []

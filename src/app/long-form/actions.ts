@@ -25,6 +25,9 @@ const VIDEO = /\.(mp4|mov|m4v|mkv|webm)$/i
 const AUDIO = /\.(mp3|wav|m4a|aac)$/i
 const OTROS: Record<string, RegExp> = { pdf: /\.pdf$/i, foto: /\.(png|jpe?g|webp|heic)$/i }
 const MAX_ARCHIVOS = 12
+// Una letra por video. Sin S (audio aparte) ni X (tercera voz): el motor las reserva.
+// Es la misma lista de long-form/motor/editor/etapas/ingesta.py (CLAVES).
+const CLAVES_FUENTE = "ABCDEFGHIJKLMNOPQRTUVWYZ"
 
 function tipoDe(nombre: string): "fuente" | "audio" | "pdf" | "foto" | null {
   if (VIDEO.test(nombre)) return "fuente"
@@ -87,7 +90,7 @@ export async function crearProyecto(datos: {
     let n = 0
     const filas = datos.archivos.map((a, i) => {
       const tipo = tipos[i]!
-      const rol = tipo === "fuente" ? "ABCDEFGH"[n++] : null
+      const rol = tipo === "fuente" ? CLAVES_FUENTE[n++] : null
       return { account_id: accountId, proyecto_id: id, tipo, nombre: a.nombre.slice(0, 200), ruta: `${accountId}/${id}/entrada/${i + 1}-${limpio(a.nombre)}`, bytes: a.bytes, rol, subida: "pendiente" }
     })
     const { data: insertados, error: e2 } = await db.from("lf_archivos").insert(filas).select("id, nombre, ruta")
