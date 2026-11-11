@@ -8,19 +8,31 @@ decide `clasificar`), asi que aqui no se hace nada que dependa de el.
 """
 from .. import ffm
 
+# Una letra por video de entrada. Sin 'S' (audio aparte) ni 'X' (tercera voz): son claves reservadas.
+# Studio usa la misma lista en src/app/long-form/actions.ts (CLAVES_FUENTE).
+CLAVES = 'ABCDEFGHIJKLMNOPQRTUVWYZ'
+
+
+def claves_de(fuentes):
+    """La clave de cada video: la que trae de Studio (`rol`) o la primera letra libre, sin repetir."""
+    if len(fuentes) > len(CLAVES):
+        raise RuntimeError(f'Como mucho {len(CLAVES)} videos por proyecto; llegaron {len(fuentes)}')
+    usadas = {f['rol'] for f in fuentes if f.get('rol')}
+    libres = iter(k for k in CLAVES if k not in usadas)
+    return [f.get('rol') or next(libres) for f in fuentes]
+
 
 def correr(ctx):
     fuentes = ctx.archivos('fuente')
     if not fuentes:
         raise RuntimeError('El proyecto no tiene videos de entrada')
     info = []
-    for i, f in enumerate(fuentes):
+    for i, (f, clave) in enumerate(zip(fuentes, claves_de(fuentes))):
         ctx.avance(f'Trayendo {f.get("nombre", "video")}', i / max(len(fuentes), 1) * .4)
         ruta = ctx.local(f)
         m = ffm.sondear(ruta)
         if not m['video']:
             raise RuntimeError(f'{f.get("nombre")} no tiene pista de video')
-        clave = f.get('rol') or 'ABCDEFGH'[i]
         if m['audio']:
             ffm.extraer_audio(ruta, ctx.tj(f'a16_{clave}.wav'), 16000, 1)
             ffm.extraer_audio(ruta, ctx.tj(f'a48_{clave}.wav'), 48000, 1)

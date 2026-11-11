@@ -196,6 +196,96 @@ def prueba_nombre_con_tildes():
         assert C.cortes_por_minuto(str(ruta), 60.0) >= 0
 
 
+def prueba_claves_de_mas_de_8_videos():
+    """Con 9 o mas videos la ingesta se caia ('ABCDEFGH'[i] → IndexError) y Studio dejaba el rol vacio."""
+    from editor.etapas import ingesta
+    ks = ingesta.claves_de([{} for _ in range(12)])
+    assert len(set(ks)) == 12 and 'S' not in ks and 'X' not in ks, ks
+    # con y sin rol mezclados: la que falta toma la primera letra libre, nunca una repetida
+    assert ingesta.claves_de([{'rol': 'B'}, {}, {'rol': 'A'}, {}]) == ['B', 'C', 'A', 'D']
+    try:
+        ingesta.claves_de([{} for _ in range(len(ingesta.CLAVES) + 1)])
+        assert False, 'debio rechazar mas videos que claves'
+    except RuntimeError:
+        pass
+    # Studio y el motor usan la misma lista
+    ts = (Path(__file__).resolve().parents[3] / 'src' / 'app' / 'long-form' / 'actions.ts').read_text(encoding='utf8')
+    assert f'CLAVES_FUENTE = "{ingesta.CLAVES}"' in ts
+
+
+def prueba_groq_caido_no_deja_tramo_vacio():
+    """Si Groq fallaba los 4 intentos, la parte se guardaba vacia y en cache: el video salia sin ese tramo."""
+    import tempfile
+    import types
+    import requests
+    from editor import ffm
+    from editor.etapas import transcripcion as T
+
+    class R:
+        def __init__(self, codigo, cuerpo=None):
+            self.status_code, self.cuerpo = codigo, cuerpo or {}
+
+        def json(self):
+            return self.cuerpo
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(str(self.status_code))
+
+    ctx = types.SimpleNamespace(spec={'idioma': 'es'}, marca=types.SimpleNamespace(cfg={'nombre': 'Plogy'}),
+                                archivos=lambda tipo: [])
+    llamadas = []
+    respuestas = iter([])
+
+    def post(*a, **k):
+        llamadas.append(1)
+        return next(respuestas)
+
+    originales = (requests.post, ffm.correr, T.time.sleep)
+    requests.post = post
+    ffm.correr = lambda args, **k: Path(args[-1]).write_bytes(b'')
+    T.time.sleep = lambda s: None
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            respuestas = iter([R(429), R(503), R(500), R(502)])
+            try:
+                T._groq_parte(ctx, 'x.wav', 0, 0.0, d)
+                assert False, 'debio fallar'
+            except RuntimeError as e:
+                assert '0–10 min' in str(e) and '4 intentos' in str(e), e
+            assert len(llamadas) == 4 and not (d / 'p00.json').exists()
+            # si un reintento responde, la parte se guarda con sus palabras
+            ok = {'segments': [{'start': 0, 'end': 2, 'text': ' hola '}], 'words': [{'word': ' hola', 'start': 0.1, 'end': 0.5}]}
+            respuestas = iter([R(429), R(200, ok)])
+            res = T._groq_parte(ctx, 'x.wav', 1, 600.0, d)
+            assert res[0]['texto'] == 'hola' and res[0]['inicio'] == 600.0 and res[0]['palabras'][0]['i'] == 600.1
+            assert (d / 'p01.json').exists()
+            # sin conexion tambien se reintenta y termina en error, no en un tramo vacio
+
+            def caido(*a, **k):
+                raise requests.ConnectionError('sin red')
+            requests.post = caido
+            try:
+                T._groq_parte(ctx, 'x.wav', 2, 1200.0, d)
+                assert False, 'debio fallar'
+            except RuntimeError as e:
+                assert 'ConnectionError' in str(e), e
+            assert not (d / 'p02.json').exists()
+            # un 401 (clave mala) no se reintenta
+            requests.post = post
+            llamadas.clear()
+            respuestas = iter([R(401)])
+            try:
+                T._groq_parte(ctx, 'x.wav', 3, 1800.0, d)
+                assert False, 'debio fallar'
+            except requests.HTTPError:
+                pass
+            assert len(llamadas) == 1
+    finally:
+        requests.post, ffm.correr, T.time.sleep = originales
+
+
 if __name__ == '__main__':
     fallas = 0
     for nombre, fn in list(globals().items()):
