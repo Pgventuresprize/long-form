@@ -23,6 +23,14 @@ SFX_MOTOR = {'rotulo': 'rotulo-entra', 'barra': 'barra-entra', 'barra_sale': 'ba
 
 GRAFICOS = {'pocos': (12, 15, 1), 'normal': (7, 9, 2), 'muchos': (5, 6, 3)}
 
+# Los mismos valores de PARAMETROS_SILENCIO en src/engine/long-form/estilo.ts (Studio los pone en
+# spec.opciones al crear el proyecto). El referente los usa para imitar que tan apretados van los silencios.
+SILENCIOS = {
+    'suave': {'silencio_k': 0.3, 'silencio_min': 1.0, 'silencio_aire': 0.3},
+    'normal': {'silencio_k': 0.35, 'silencio_min': 0.6, 'silencio_aire': 0.18},
+    'fuerte': {'silencio_k': 0.4, 'silencio_min': 0.4, 'silencio_aire': 0.12},
+}
+
 
 def _esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')

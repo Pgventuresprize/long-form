@@ -11,14 +11,22 @@ import numpy as np
 from . import ffm
 
 
-def pausas(wav, k=0.35, minimo=0.6, aire=0.18):
-    sr, x = ffm.leer_wav(wav)
-    h = 0.02
-    f = int(sr * h)
+PASO = 0.02
+
+
+def niveles(sr, x):
+    """Nivel en dB cada 20 ms, suavizado a 100 ms. Lo usan las pausas y el referente (musica entre frases)."""
+    f = int(sr * PASO)
     n = len(x) // f
     rms = np.sqrt((np.asarray(x[:n * f], np.float32).reshape(n, f) ** 2).mean(1))
     db = 20 * np.log10(rms + 1e-5)
-    db = np.convolve(db, np.ones(5) / 5, 'same')
+    return np.convolve(db, np.ones(5) / 5, 'same')
+
+
+def pausas(wav, k=0.35, minimo=0.6, aire=0.18):
+    sr, x = ffm.leer_wav(wav)
+    h = PASO
+    db = niveles(sr, x)
     voz, piso = np.percentile(db, 90), np.percentile(db, 5)
     thr = piso + k * (voz - piso)
     q = db < thr
