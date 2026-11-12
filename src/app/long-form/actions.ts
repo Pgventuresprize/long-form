@@ -7,6 +7,7 @@ import { estiloDe } from "@/engine/long-form/estilo-datos"
 import { avisar, avisosDe, BUCKET, marcarLeidos, proyectoDe, urlsFirmadas, type Aviso, type Proyecto } from "@/engine/long-form/datos"
 import { encolarEtapa } from "@/engine/long-form/motor"
 import { formatoPorNombre, MENSAJE_FORMATO } from "@/engine/long-form/audio"
+import { encajaEnTipo, MENSAJE_ENTRADA, opcionesDelSpec, opcionesValidas, ordenDeFuentes, TIPOS_ENTRADA, USOS_MUSICA, type OpcionesVideo, type TipoEntrada, type UsoMusica } from "@/engine/long-form/nuevo"
 import { specDesdeEstilo, type SpecProyecto } from "@/engine/long-form/proyectos"
 import { rutaReferente, validarUrlReferente, VIDEO_REFERENTE } from "@/engine/long-form/referente"
 import { TIPOS_GRABACION } from "@/engine/long-form/tipos"
@@ -26,24 +27,32 @@ const fallo = (e: unknown): { ok: false; error: string } => ({ ok: false, error:
 const VIDEO = /\.(mp4|mov|m4v|mkv|webm)$/i
 const AUDIO = /\.(mp3|wav|m4a|aac)$/i
 const OTROS: Record<string, RegExp> = { pdf: /\.pdf$/i, foto: /\.(png|jpe?g|webp|heic)$/i }
-const MAX_ARCHIVOS = 12
+const MAX_ARCHIVOS = 30
 // Una letra por video. Sin S (audio aparte) ni X (tercera voz): el motor las reserva.
 // Es la misma lista de long-form/motor/editor/etapas/ingesta.py (CLAVES).
 const CLAVES_FUENTE = "ABCDEFGHIJKLMNOPQRTUVWYZ"
+const MAX_FUENTES = 12
 
-/** Para que suena una musica del video: al empezar, bajo toda la conversacion o al cerrar. */
-export type UsoMusica = "intro" | "fondo" | "cierre"
-const USOS_MUSICA: UsoMusica[] = ["intro", "fondo", "cierre"]
+export type { UsoMusica }
 
-type Entrada = { nombre: string; bytes: number; uso?: UsoMusica }
+/**
+ * Un archivo que sube el navegador. `tipo` lo dice la pantalla segun donde lo puso la persona (videos para
+ * editar, audio aparte, carpeta de apoyo); `uso`, para que es una musica. `orden` es la posicion de un video en
+ * la lista de clips (solo `fuente`).
+ */
+type Entrada = { nombre: string; bytes: number; uso?: UsoMusica; tipo?: TipoEntrada; orden?: number }
+
+/** Un video de un proyecto anterior de la marca que se vuelve a usar sin subirlo. Un id suelto va al final. */
+type Reuso = string | { archivoId: string; orden?: number }
 
 /**
  * Que es cada archivo. Una musica viene marcada con su `uso` (la persona dijo para que es): entra como
- * `musica` aunque sea un MP3 o un MP4, y de un video se usa solo el audio. Sin marca, manda la extension
- * (un MP3 suelto es el "audio aparte" que reemplaza al de camara).
+ * `musica` aunque sea un MP3 o un MP4, y de un video se usa solo el audio. Con `tipo`, manda lo que dijo la
+ * persona (si la extension encaja). Sin nada, la extension, como antes (un MP3 suelto es el "audio aparte").
  */
-function tipoDe(a: Entrada): "fuente" | "audio" | "pdf" | "foto" | "musica" | null {
+function tipoDe(a: Entrada): "fuente" | "audio" | "pdf" | "foto" | "ilustracion" | "musica" | null {
   if (a.uso) return USOS_MUSICA.includes(a.uso) && formatoPorNombre(a.nombre, "") ? "musica" : null
+  if (a.tipo !== undefined) return TIPOS_ENTRADA.includes(a.tipo) && encajaEnTipo(a.nombre, a.tipo) ? a.tipo : null
   const nombre = a.nombre
   if (VIDEO.test(nombre)) return "fuente"
   if (AUDIO.test(nombre)) return "audio"
@@ -81,9 +90,16 @@ export async function crearProyecto(datos: {
   notas: string
   ctaDefecto: string | null
   archivos: Entrada[]
+  /**
+   * Videos de proyectos anteriores de la marca (ids de `lf_archivos`, tipo fuente y ya subidos) que se usan otra
+   * vez. No se suben: Storage los copia a la carpeta del proyecto nuevo.
+   */
+  reutilizar?: Reuso[]
   /** Musica elegida de la biblioteca de la marca para este video (ids de `lf_biblioteca`), por uso. */
   musicaBiblioteca?: Partial<Record<UsoMusica, string>>
   referente?: ReferenteNuevo | null
+  /** Formato, duracion, subtitulos, gancho y capitulos: van a spec.opciones (ver `opcionesDelSpec`). */
+  opciones?: OpcionesVideo
 }): Promise<Hecho<{ id: string; subidas: Subida[]; destino: DestinoSubida }>> {
   try {
     const accountId = await idDeCuentaCon("long_form")
@@ -91,25 +107,45 @@ export async function crearProyecto(datos: {
     const titulo = datos.titulo.trim().slice(0, 160)
     if (!titulo) return { ok: false, error: "Ponle un título al video." }
     if (!NIVELES.includes(datos.esfuerzo)) return { ok: false, error: "Elige un nivel." }
-    if (!datos.archivos.length) return { ok: false, error: "Agrega al menos un video." }
-    if (datos.archivos.length > MAX_ARCHIVOS) return { ok: false, error: `Como mucho ${MAX_ARCHIVOS} archivos por video.` }
-    const tipos = datos.archivos.map((a) => tipoDe(a))
-    const malo = datos.archivos.find((_, i) => !tipos[i])
-    if (malo) return { ok: false, error: malo.uso ? `${malo.nombre}: ${MENSAJE_FORMATO}` : `${malo.nombre} no es un video, un audio, un PDF ni una foto.` }
-    if (!tipos.includes("fuente")) return { ok: false, error: "Agrega al menos un video." }
-    const repetido = USOS_MUSICA.find((u) => datos.archivos.filter((a) => a.uso === u).length + (datos.musicaBiblioteca?.[u] ? 1 : 0) > 1)
+    const archivos = Array.isArray(datos.archivos) ? datos.archivos : []
+    const reusos = [...new Map((datos.reutilizar ?? []).map((r) => (typeof r === "string" ? { archivoId: r } : r)).filter((r) => typeof r?.archivoId === "string").map((r) => [r.archivoId, r])).values()]
+    if (!archivos.length && !reusos.length) return { ok: false, error: "Agrega al menos un video." }
+    if (archivos.length + reusos.length > MAX_ARCHIVOS) return { ok: false, error: `Como mucho ${MAX_ARCHIVOS} archivos por video.` }
+    const tipos = archivos.map((a) => tipoDe(a))
+    const malo = archivos.find((_, i) => !tipos[i])
+    if (malo) return { ok: false, error: malo.uso ? `${malo.nombre}: ${MENSAJE_FORMATO}` : malo.tipo ? `${malo.nombre} ${MENSAJE_ENTRADA[malo.tipo] ?? "no se puede usar."}` : `${malo.nombre} no es un video, un audio, un PDF ni una foto.` }
+    const nFuentes = tipos.filter((t) => t === "fuente").length + reusos.length
+    if (!nFuentes) return { ok: false, error: "Agrega al menos un video." }
+    if (nFuentes > MAX_FUENTES) return { ok: false, error: `Como mucho ${MAX_FUENTES} videos para editar.` }
+    // El motor usa un solo audio aparte y un solo PDF: con dos, el segundo no saldria y nadie se enteraria.
+    if (archivos.filter((a, i) => a.tipo === "audio" && tipos[i] === "audio").length > 1) return { ok: false, error: "Sube un solo audio aparte." }
+    if (archivos.filter((a, i) => a.tipo === "pdf" && tipos[i] === "pdf").length > 1) return { ok: false, error: "Sube un solo PDF por video." }
+    const repetido = USOS_MUSICA.find((u) => archivos.filter((a) => a.uso === u).length + (datos.musicaBiblioteca?.[u] ? 1 : 0) > 1)
     if (repetido) return { ok: false, error: `Elige una sola música de ${repetido === "intro" ? "inicio" : repetido}.` }
     const ref = referenteValido(datos.referente)
     if (!ref.ok) return ref
+    const op = opcionesValidas(datos.opciones)
+    if (!op.ok) return op
 
     const estilo = await estiloDe(accountId)
     if (!estilo?.listo) return { ok: false, error: "Primero confirma el estilo de long form en Marca." }
+    const base = specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name })
     const spec: SpecProyecto & Record<string, unknown> = {
-      ...specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name }),
+      ...base,
+      opciones: { ...base.opciones, ...opcionesDelSpec(op.opciones) },
       ...(ref.url ? { referente_url: ref.url } : {}),
     }
 
     const db = supabaseAdmin()
+    // Los videos que se reusan: de esta marca, fuentes y ya subidos. Lo demas no se copia aunque llegue su id.
+    type Previo = { id: string; nombre: string; ruta: string; bytes: number | null; persona: string | null }
+    let previos: Previo[] = []
+    if (reusos.length) {
+      const { data } = await db.from("lf_archivos").select("id, nombre, ruta, bytes, persona").eq("account_id", accountId).eq("tipo", "fuente").eq("subida", "lista").in("id", reusos.map((r) => r.archivoId))
+      const filas = (data ?? []) as Previo[]
+      previos = reusos.map((r) => filas.find((f) => f.id === r.archivoId)).filter((f): f is Previo => Boolean(f && f.ruta.startsWith(`${accountId}/`)))
+      if (previos.length !== reusos.length) return { ok: false, error: "Uno de los videos de la biblioteca ya no está. Quítalo y vuelve a intentarlo." }
+    }
     // La musica elegida de la biblioteca: el motor la baja de Storage por su ruta (render.py, `musica_<uso>`).
     const elegidas = Object.entries(datos.musicaBiblioteca ?? {}).filter(([u, aid]) => USOS_MUSICA.includes(u as UsoMusica) && aid)
     if (elegidas.length) {
@@ -129,26 +165,61 @@ export async function crearProyecto(datos: {
     if (error || !p) return { ok: false, error: `No se pudo crear: ${error?.message ?? "sin respuesta"}` }
     const id = (p as { id: string }).id
 
-    let n = 0
-    const filas: { account_id: string; proyecto_id: string; tipo: string; nombre: string; ruta: string; bytes: number; rol: string | null; subida: string }[] = datos.archivos.map((a, i) => {
-      const tipo = tipos[i]!
-      // El rol: la letra de cada video, o para que es cada musica (render.py la busca por ese rol).
-      const rol = tipo === "fuente" ? CLAVES_FUENTE[n++] : tipo === "musica" ? a.uso! : null
-      return { account_id: accountId, proyecto_id: id, tipo, nombre: a.nombre.slice(0, 200), ruta: `${accountId}/${id}/entrada/${i + 1}-${limpio(a.nombre)}`, bytes: a.bytes, rol, subida: "pendiente" }
+    // Si algo falla de aqui en adelante, el proyecto a medias se borra (con sus filas): no queda colgado en el tablero.
+    const copias: { de: string; a: string }[] = []
+    const deshacer = async (error: string): Promise<{ ok: false; error: string }> => {
+      await db.from("lf_proyectos").delete().eq("id", id)
+      if (copias.length) await db.storage.from(BUCKET).remove(copias.map((c) => c.a))
+      return { ok: false, error }
+    }
+
+    type Fila = { account_id: string; proyecto_id: string; tipo: string; nombre: string; ruta: string; bytes: number | null; rol: string | null; persona?: string | null; subida: string; creado?: string }
+    // Cada subida guarda su posicion en `archivos` en la ruta ("entrada/3-nombre.mp4"): asi el navegador sabe que
+    // archivo va con cada firma.
+    const filaDe = (a: Entrada, i: number): Fila => ({ account_id: accountId, proyecto_id: id, tipo: tipos[i]!, nombre: a.nombre.slice(0, 200), ruta: `${accountId}/${id}/entrada/${i + 1}-${limpio(a.nombre)}`, bytes: a.bytes, rol: tipos[i] === "musica" ? a.uso! : null, subida: "pendiente" })
+
+    // Los videos van en el orden de la lista de clips, subidos y reusados mezclados. La letra de cada uno (A, B...)
+    // sigue ese orden.
+    const subidosFuente = archivos.map((a, i) => ({ a, i })).filter(({ i }) => tipos[i] === "fuente")
+    const orden = ordenDeFuentes(subidosFuente.map(({ a }) => ({ orden: a.orden })), reusos)
+    const fuentes: Fila[] = orden.map((o, k) => {
+      if (o.de === "subida") return { ...filaDe(subidosFuente[o.i].a, subidosFuente[o.i].i), rol: CLAVES_FUENTE[k] }
+      // Un reuso no se sube otra vez: Storage copia el original a la carpeta de este proyecto (cada proyecto tiene
+      // sus archivos, y la ruta es unica en lf_archivos).
+      const p = previos[o.i]
+      const ruta = `${accountId}/${id}/entrada/r${o.i + 1}-${limpio(p.nombre)}`
+      copias.push({ de: p.ruta, a: ruta })
+      return { account_id: accountId, proyecto_id: id, tipo: "fuente", nombre: p.nombre.slice(0, 200), ruta, bytes: p.bytes, rol: CLAVES_FUENTE[k], persona: p.persona, subida: "lista" }
     })
+    const filas: Fila[] = [...fuentes, ...archivos.flatMap((a, i) => (tipos[i] === "fuente" ? [] : [filaDe(a, i)]))]
     // El referente es un archivo mas del proyecto, con su tipo explicito y su propia ruta.
     if (ref.archivo) {
       const { nombre, bytes } = ref.archivo
       filas.push({ account_id: accountId, proyecto_id: id, tipo: "referente", nombre: nombre.slice(0, 200), ruta: rutaReferente(accountId, id, limpio(nombre)), bytes, rol: null, subida: "pendiente" })
     }
-    const { data: insertados, error: e2 } = await db.from("lf_archivos").insert(filas).select("id, nombre, ruta")
-    if (e2) return { ok: false, error: `No se pudieron registrar los archivos: ${e2.message}` }
+    // El motor lee los archivos por `creado`: una marca de tiempo por fila, en orden, para que los videos le
+    // lleguen como estan en la lista (en un solo insert todas tendrian la misma).
+    const t0 = Date.now()
+    filas.forEach((f, k) => (f.creado = new Date(t0 + k).toISOString()))
+
+    const copiadas = await Promise.all(copias.map((c) => db.storage.from(BUCKET).copy(c.de, c.a)))
+    const fallida = copiadas.findIndex((r) => r.error)
+    if (fallida >= 0) return deshacer(`No se pudo usar ${fuentes.find((f) => f.ruta === copias[fallida].a)?.nombre ?? "un video de la biblioteca"}: ${copiadas[fallida].error?.message}`)
+
+    const { data: insertados, error: e2 } = await db.from("lf_archivos").insert(filas).select("id, nombre, ruta, subida")
+    if (e2) return deshacer(`No se pudieron registrar los archivos: ${e2.message}`)
 
     const subidas: Subida[] = []
-    for (const a of (insertados ?? []) as { id: string; nombre: string; ruta: string }[]) {
+    for (const a of ((insertados ?? []) as { id: string; nombre: string; ruta: string; subida: string }[]).filter((x) => x.subida === "pendiente")) {
       const { data, error: e3 } = await db.storage.from(BUCKET).createSignedUploadUrl(a.ruta, { upsert: true })
-      if (e3 || !data) return { ok: false, error: `No se pudo preparar la subida: ${e3?.message ?? "sin respuesta"}` }
+      if (e3 || !data) return deshacer(`No se pudo preparar la subida: ${e3?.message ?? "sin respuesta"}`)
       subidas.push({ archivoId: a.id, nombre: a.nombre, ruta: a.ruta, token: data.token })
+    }
+    // Todo venia de la biblioteca: no hay nada que esperar, el proceso empieza ya.
+    if (!subidas.length) {
+      await db.from("lf_proyectos").update({ tablero: "procesando", fase: "en_cola", detalle: "ingesta" }).eq("id", id)
+      await avisar(accountId, id, "subida", "Material listo", `${titulo}: empieza el proceso.`)
+      await encolarEtapa(id, "ingesta")
     }
     revalidatePath("/long-form")
     return { ok: true, id, subidas, destino: destinoSubida() }
