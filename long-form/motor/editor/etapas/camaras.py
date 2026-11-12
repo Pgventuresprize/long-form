@@ -438,10 +438,11 @@ def edl(ctx, rep):
     largo = {'W': ctx.opcion('plano_abierto_s', 13), 'C': ctx.opcion('plano_cerrado_s', 13), 'O': ctx.opcion('plano_doble_s', 8)}
     planos = []
     marco = {A: 0, B: 0}
-    INTRO = 6.0
-    planos.append([T0, T0 + INTRO, 'TWO'])
+    # el programa abre con 6 s de plano doble (no es la tarjeta de intro: esa va aparte, extremos.py)
+    APERTURA = 6.0
+    planos.append([T0, T0 + APERTURA, 'TWO'])
     for sp, a_, b_ in turnos:
-        a_ = max(a_, T0 + INTRO)
+        a_ = max(a_, T0 + APERTURA)
         if b_ <= a_:
             continue
         if sp == 'X':
@@ -466,7 +467,7 @@ def edl(ctx, rep):
         marco[sp] = f % 2
     ult = -1e9
     for sp, a_, b_ in reacciones:
-        if a_ - ult < 12 or en_dos(a_) or a_ < T0 + INTRO:
+        if a_ - ult < 12 or en_dos(a_) or a_ < T0 + APERTURA:
             continue
         ra = a_ - 0.25
         planos.append([ra, ra + min(max(b_ - a_ + 0.9, 2.0), 3.2), sp + 'W'])

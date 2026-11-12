@@ -21,7 +21,6 @@ from ..contexto import Mapa
 
 T_IN, T_OUT = 1.0, 0.6
 W, HH = 1920, 1080           # las piezas se dibujan a 1920x1080 y se escalan a la salida
-INTRO, OUTRO = 5.4, 6.0
 
 SFX = {'pregunta': ('pregunta-entra', 'pregunta-sale'), 'cita': ('cita-entra', None), 'rotulo': ('rotulo-entra', None),
        'barra': ('barra-entra', 'barra-sale'), 'popup': ('popup-entra', None), 'foto': ('popup-entra', None),
@@ -389,7 +388,10 @@ def correr(ctx):
         if c.get('aplicar'):
             ctx.log(f'corte editorial {c["inicio"]:.1f}–{c["fin"]:.1f} s: {c.get("motivo", "")}')
     keep = silencios.conservar(fin, [tuple(c) for c in cortes] + edit, ctx.FPS)
-    mapa = Mapa(keep, ctx.FPS, INTRO)
+    # aqui se fija la intro y el cierre del video (extremos.py): render, qa, clips y publicar leen lo guardado
+    from .. import extremos
+    ext = extremos.resolver(ctx, avisar=True)
+    mapa = Mapa(keep, ctx.FPS, ext['intro']['s'])
     ctx.guardar('keep', keep)
     ctx.log(f'queda {mapa.total / ctx.FPS / 60:.1f} min de programa ({len(edit)} cortes editoriales)')
     if ctx.tipo == 'meet' and any(t.get('pill') for t in tomas):
@@ -420,8 +422,8 @@ def correr(ctx):
     ajustadas = tipo.tomas_render(ctx, items, mapa)
     if ajustadas is not None:
         ctx.guardar('tomas_render', ajustadas)
-    info = {'piezas': piezas, 'intro': str(pi), 'cierre': str(pc), 'disposicion': disp,
-            'intro_s': INTRO, 'cierre_s': OUTRO}
+    # las tarjetas se dibujan siempre: la de intro es la portada de YouTube aunque el video no la lleve
+    info = {'piezas': piezas, 'intro': str(pi), 'cierre': str(pc), 'disposicion': disp, **extremos.a_graficos(ext)}
     gancho = g.get('gancho')
     if gancho and not gancho.get('omitir'):
         # el gancho abre el video antes de la tarjeta: lo conservado de su tramo (sin silencios ni cortes)
@@ -435,7 +437,7 @@ def correr(ctx):
         if kg:
             info['gancho_keep'] = kg
             info['gancho_s'] = Mapa(kg, ctx.FPS, 0.0).total / ctx.FPS
-            ctx.log(f'gancho {gancho["inicio"]:.1f}–{gancho["fin"]:.1f} s: {info["gancho_s"]:.1f} s antes de la intro')
+            ctx.log(f'gancho {gancho["inicio"]:.1f}–{gancho["fin"]:.1f} s: {info["gancho_s"]:.1f} s al abrir el video')
         else:
             ctx.aviso('El gancho quedó dentro de un tramo cortado: el video abre con la intro.')
     ctx.guardar('graficos', info)

@@ -28,7 +28,8 @@ def elegir(opciones, parametros, clave, defecto):
 
 
 def desfase(graficos):
-    """Segundos del video final antes del programa: el gancho (si hay) y la tarjeta de intro."""
+    """Segundos del video final antes del programa: el gancho (si hay) y la intro (la que fijo extremos.py en
+    estado.graficos: la tarjeta, el video de la marca, o 0 sin intro)."""
     return float(graficos.get('gancho_s') or 0) + graficos['intro_s']
 
 

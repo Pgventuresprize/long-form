@@ -10,10 +10,9 @@ Segun lo que eligio la persona en Studio (o sugiere el referente, ver ctx.elecci
 from .. import estilo
 from .. import guion as G
 from .. import ia, silencios
+from .. import extremos
 from ..contexto import Mapa
 
-INTRO = 5.4
-OUTRO = 6.0
 TOLERANCIA = 1.03           # un 3 % sobre el objetivo ya esta bien: no se corta por segundos
 NIVELES = ('suave', 'normal', 'fuerte')
 
@@ -103,7 +102,9 @@ def correr(ctx):
     minimo = tipo.silencio_min or ctx.opcion('silencio_min', 0.6)
     cortes_sil, info = silencios.pausas(wav, k, minimo, ctx.opcion('silencio_aire', 0.18))
     keep = silencios.conservar(fin, cortes_sil, ctx.FPS)
-    mapa = Mapa(keep, ctx.FPS, INTRO)
+    # la intro y el cierre del video (tarjeta de Studio, video de la marca o nada): extremos.py
+    intro_s, cierre_s = extremos.segundos(ctx)
+    mapa = Mapa(keep, ctx.FPS, intro_s)
     ctx.json_trabajo('silencios.json', cortes_sil)
     ctx.log(f"silencios: voz {info['voz_db']} dB, piso {info['piso_db']} dB, umbral {info['umbral_db']} dB; "
             f"{info['pausas']} pausas, se quitan {info['segundos'] / 60:.1f} min; queda {mapa.total / ctx.FPS / 60:.1f} min de {fin / 60:.1f}")
@@ -114,7 +115,7 @@ def correr(ctx):
     quiere_gancho = bool(ctx.eleccion('gancho', False))
     minimo, objetivo = rango_s(ctx)
     broll = ctx.eleccion('broll_cada_min', None)
-    pedido = pedido_duracion(INTRO + mapa.total / ctx.FPS + OUTRO, objetivo, minimo)
+    pedido = pedido_duracion(intro_s + mapa.total / ctx.FPS + cierre_s, objetivo, minimo)
     ctx.avance('Proponiendo preguntas, citas y capítulos', .35)
     con_ia = True
     try:
@@ -188,7 +189,7 @@ def correr(ctx):
     # duracion objetivo: con los cortes propuestos, ¿todavia sobra? entonces se aprietan los silencios un nivel
     edit = cortes_aplicados(g)
     keep = silencios.conservar(fin, [tuple(c) for c in cortes_sil] + edit, ctx.FPS)
-    estimada = INTRO + Mapa(keep, ctx.FPS, INTRO).total / ctx.FPS + OUTRO
+    estimada = intro_s + Mapa(keep, ctx.FPS, intro_s).total / ctx.FPS + cierre_s
     if objetivo and estimada > objetivo * TOLERANCIA:
         sig = apretar_silencios(k, minimo, ctx.opcion('silencio_aire', 0.18))
         if sig:
@@ -198,7 +199,7 @@ def correr(ctx):
             ctx.json_trabajo('silencios.json', cortes_sil)
             info['apretados'] = nivel
             keep = silencios.conservar(fin, [tuple(c) for c in cortes_sil] + edit, ctx.FPS)
-            estimada = INTRO + Mapa(keep, ctx.FPS, INTRO).total / ctx.FPS + OUTRO
+            estimada = intro_s + Mapa(keep, ctx.FPS, intro_s).total / ctx.FPS + cierre_s
             ctx.log(f'duración objetivo {objetivo / 60:.1f} min: silencios apretados a «{nivel}», quedan {estimada / 60:.1f} min')
         if estimada > objetivo * TOLERANCIA:
             ctx.aviso(f'El video queda en {estimada / 60:.1f} min y el objetivo es {objetivo / 60:.1f} min: '
@@ -209,7 +210,7 @@ def correr(ctx):
                   'no hay más material que conservar.')
     # los graficos fijos van en tiempo de salida: con cortes por duracion se ubican sobre lo que de verdad queda
     if any(c.get('tipo') == 'duracion' and c.get('aplicar') for c in g['cortes']) or info.get('apretados'):
-        mapa = Mapa(keep, ctx.FPS, INTRO)
+        mapa = Mapa(keep, ctx.FPS, intro_s)
     g['fijas'] = G.colocar_fijas(ctx, g, mapa, personas, segs)
     g.setdefault('titulo', ctx.spec.get('titulo', ''))
     g['subtitulo_intro'] = ctx.spec.get('subtitulo_intro') or ' × '.join(p['nombre'] for p in personas[:3])
