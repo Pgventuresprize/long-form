@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { NIVELES, NOMBRE_NIVEL, type Nivel } from "@/engine/long-form/estilo"
-import { agregarIndicacion, DURACIONES, FORMATOS_VIDEO, NOMBRE_DURACION, NOMBRE_TRIESTADO, TRIESTADOS, type Duracion, type OpcionesVideo } from "@/engine/long-form/nuevo"
+import { agregarIndicacion, FORMATOS_VIDEO, NOMBRE_TRIESTADO, TRIESTADOS, type OpcionesVideo } from "@/engine/long-form/nuevo"
 
 import { ErrorCampo, Segmentado } from "./comun"
+import { DuracionDeslizable } from "./duracion"
 
 const SUGERENCIAS = [
   "Quita silencios y muletillas",
@@ -136,18 +136,7 @@ export function Indicaciones({
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Segmentado etiqueta="Formato" valor={opciones.formato} opciones={FORMATOS_VIDEO.map((f) => ({ valor: f, nombre: f }))} onCambio={(v) => cambiar("formato", v)} deshabilitado={ocupado} />
-        <Select value={opciones.duracion} onValueChange={(v) => v && cambiar("duracion", v as Duracion)} disabled={ocupado}>
-          <SelectTrigger size="sm" aria-label="Duración" className="rounded-full text-xs">
-            <SelectValue>{(v: Duracion) => `Duración: ${NOMBRE_DURACION[v] ?? ""}`}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {DURACIONES.map((d) => (
-              <SelectItem key={d} value={d}>
-                {NOMBRE_DURACION[d]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <DuracionDeslizable valor={opciones.duracion} onCambio={(v) => cambiar("duracion", v)} deshabilitado={ocupado} />
         <span className="flex items-center gap-1.5 text-xs">
           <span className="text-muted-foreground" aria-hidden>
             Subtítulos

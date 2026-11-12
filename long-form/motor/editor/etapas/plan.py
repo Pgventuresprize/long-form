@@ -32,24 +32,47 @@ def apretar_silencios(k, minimo, aire):
     return sig, dict(estilo.SILENCIOS[sig])
 
 
-def pedido_duracion(estimada_s, objetivo_s):
-    """Lo que se le dice a Claude si el video sobra; None si ya cabe (o no hay objetivo)."""
+# Si lo pedido es menos del 40 % de lo que hay, cortar pedazos no sirve (serian decenas de cortes): se le pide a
+# Claude que elija los tramos que se quedan y lo demas se corta.
+UMBRAL_SELECCION = 0.4
+
+
+def pedido_duracion(estimada_s, objetivo_s, minimo_s=None):
+    """Lo que se le dice a Claude si el video sobra; None si ya cabe (o no hay objetivo). `objetivo_s` es el
+    maximo del rango que eligio la persona y `minimo_s` su piso: cualquier largo entre los dos esta bien.
+    `modo`: 'cortes' (quitar lo que menos aporta) o 'seleccion' (elegir lo que se queda)."""
     if not objetivo_s or estimada_s <= objetivo_s * TOLERANCIA:
         return None
-    return {'estimada_s': round(estimada_s, 1), 'objetivo_s': round(objetivo_s, 1)}
+    p = {'estimada_s': round(estimada_s, 1), 'objetivo_s': round(objetivo_s, 1),
+         'modo': 'seleccion' if objetivo_s < estimada_s * UMBRAL_SELECCION else 'cortes'}
+    if minimo_s:
+        p['minimo_s'] = round(minimo_s, 1)
+    return p
 
 
 def cortes_aplicados(g):
     return [(c['inicio'], c['fin']) for c in g.get('cortes', []) if c.get('aplicar')]
 
 
+def rango_s(ctx):
+    """(minimo, maximo) en segundos de lo que pidio la persona. Studio manda el rango (`duracion_rango_min`,
+    [minimo, maximo] en minutos) y el maximo como `duracion_objetivo_min`; un proyecto viejo solo trae el
+    objetivo. Sin nada: (None, None), el video dura lo que de el material."""
+    def num(v):
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            return None
+        return v if v > 0 else None
+    r = ctx.eleccion('duracion_rango_min', None)
+    if isinstance(r, (list, tuple)) and len(r) == 2 and num(r[0]) and num(r[1]) and num(r[1]) >= num(r[0]):
+        return num(r[0]) * 60, num(r[1]) * 60
+    v = num(ctx.eleccion('duracion_objetivo_min', None))
+    return None, (v * 60 if v else None)
+
+
 def objetivo_s(ctx):
-    v = ctx.eleccion('duracion_objetivo_min', None)
-    try:
-        v = float(v) if v is not None else None
-    except (TypeError, ValueError):
-        return None
-    return v * 60 if v and v > 0 else None
+    return rango_s(ctx)[1]
 
 
 def personas_aprobadas(ctx):
@@ -89,9 +112,9 @@ def correr(ctx):
         return
     # lo que eligio la persona (o sugiere el referente): gancho, duracion objetivo y ritmo de las ilustraciones
     quiere_gancho = bool(ctx.eleccion('gancho', False))
-    objetivo = objetivo_s(ctx)
+    minimo, objetivo = rango_s(ctx)
     broll = ctx.eleccion('broll_cada_min', None)
-    pedido = pedido_duracion(INTRO + mapa.total / ctx.FPS + OUTRO, objetivo)
+    pedido = pedido_duracion(INTRO + mapa.total / ctx.FPS + OUTRO, objetivo, minimo)
     ctx.avance('Proponiendo preguntas, citas y capítulos', .35)
     con_ia = True
     try:
@@ -121,6 +144,15 @@ def correr(ctx):
         c['rol'] = c.get('rol') or (p.get('rol') if p else '')
         if len(c['texto']) > tope:
             c['revisar'] = (c.get('revisar', '') + f' Tiene {len(c["texto"])} caracteres (máximo {tope}).').strip()
+    # modo seleccion: Claude dijo que tramos se quedan; lo demas pasa a cortes por duracion (a frases completas abajo)
+    if pedido and pedido['modo'] == 'seleccion':
+        sel = G.seleccion_a_cortes(g.get('seleccion'), fin)
+        if sel:
+            g['cortes'] = [c for c in g['cortes'] if c.get('tipo') != 'duracion'] + sel
+            ctx.log(f"IA: eligió {len(g.get('seleccion') or [])} tramos para la duración pedida; se cortan {len(sel)} tramos")
+        elif con_ia:
+            ctx.aviso('Claude no eligió tramos para la duración pedida: el video queda más largo. En el guion puedes agregar cortes.')
+    g.pop('seleccion', None)
     for c in g['cortes']:
         c['aplicar'] = c.get('tipo') in ('nota_editorial', 'logistica', 'privado', 'duracion')
     g['cortes'] = G.ajustar_cortes_duracion(g['cortes'], segs)
@@ -171,6 +203,10 @@ def correr(ctx):
         if estimada > objetivo * TOLERANCIA:
             ctx.aviso(f'El video queda en {estimada / 60:.1f} min y el objetivo es {objetivo / 60:.1f} min: '
                       'en el guion puedes agregar cortes para acercarte.')
+    if minimo and estimada < minimo / TOLERANCIA:
+        # no se alarga nada: si el material no alcanza, se dice
+        ctx.aviso(f'El video queda en {estimada / 60:.1f} min y pediste desde {minimo / 60:.1f} min: '
+                  'no hay más material que conservar.')
     # los graficos fijos van en tiempo de salida: con cortes por duracion se ubican sobre lo que de verdad queda
     if any(c.get('tipo') == 'duracion' and c.get('aplicar') for c in g['cortes']) or info.get('apretados'):
         mapa = Mapa(keep, ctx.FPS, INTRO)
@@ -184,6 +220,9 @@ def correr(ctx):
     if objetivo:
         g['duracion_objetivo'] = round(objetivo, 1)
         plan['duracion_objetivo'] = g['duracion_objetivo']
+    if minimo and objetivo:
+        g['duracion_rango'] = [round(minimo, 1), round(objetivo, 1)]
+        plan['duracion_rango'] = g['duracion_rango']
     g.pop('_uso', None)
     ctx.guardar('plan', plan)
     ctx.guardar('guion', g)

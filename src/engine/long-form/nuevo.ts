@@ -99,11 +99,44 @@ export function usoLibre(pistas: { uso: UsoMusica | null }[], preferido?: UsoMus
 export const FORMATOS_VIDEO = ["16:9", "9:16", "1:1"] as const
 export type FormatoVideo = (typeof FORMATOS_VIDEO)[number]
 
-export const DURACIONES = ["auto", "8-12", "15-20", "30+"] as const
+/**
+ * La duracion del video final: "lo que de el material" o un rango. Los rangos crecen en escala logaritmica (cada
+ * uno es mas o menos el doble del anterior): de 30 s a 1 min, de 1 a 2, de 2 a 4... hasta 1 a 2 h. Asi el
+ * control deslizable sirve igual para un video corto que para uno largo. Van en orden: el indice es la posicion
+ * del control.
+ */
+export const DURACIONES = ["auto", "0.5-1", "1-2", "2-4", "4-8", "8-15", "15-30", "30-60", "60-120"] as const
 export type Duracion = (typeof DURACIONES)[number]
-export const NOMBRE_DURACION: Record<Duracion, string> = { auto: "Lo que dé el material", "8-12": "8–12 min", "15-20": "15–20 min", "30+": "30 min o más" }
-/** El punto medio de cada rango, en minutos: es lo que lee el motor. */
-const MINUTOS: Record<Exclude<Duracion, "auto">, number> = { "8-12": 10, "15-20": 17.5, "30+": 35 }
+/** Cada rango en minutos: [minimo, maximo]. Es lo que lee el motor (`duracion_rango_min`). */
+export const RANGO_DURACION: Record<Exclude<Duracion, "auto">, [number, number]> = {
+  "0.5-1": [0.5, 1],
+  "1-2": [1, 2],
+  "2-4": [2, 4],
+  "4-8": [4, 8],
+  "8-15": [8, 15],
+  "15-30": [15, 30],
+  "30-60": [30, 60],
+  "60-120": [60, 120],
+}
+
+/** "30 s", "1 min", "1 h". */
+export function minutosTexto(m: number): string {
+  if (m < 1) return `${Math.round(m * 60)} s`
+  if (m >= 60 && m % 60 === 0) return `${m / 60} h`
+  return `${m} min`
+}
+
+export const NOMBRE_DURACION: Record<Duracion, string> = Object.fromEntries(
+  DURACIONES.map((d) => {
+    if (d === "auto") return [d, "Lo que dé el material"]
+    const [a, b] = RANGO_DURACION[d]
+    // "30 s – 1 min", "1–2 min", "1–2 h": la unidad una vez si es la misma
+    const ua = minutosTexto(a).split(" ")[1]
+    const ub = minutosTexto(b).split(" ")[1]
+    const na = minutosTexto(a).split(" ")[0]
+    return [d, ua === ub ? `${na}–${minutosTexto(b)}` : `${minutosTexto(a)} – ${minutosTexto(b)}`]
+  })
+) as Record<Duracion, string>
 
 /** Auto deja la decision al estilo de la marca y al motor; Si y No mandan. */
 export const TRIESTADOS = ["auto", "si", "no"] as const
@@ -131,13 +164,17 @@ export function opcionesValidas(v: unknown): { ok: true; opciones: OpcionesVideo
 }
 
 /**
- * Lo que va a `spec.opciones` (el contrato con el motor): `formato` y `capitulos` siempre;
- * `duracion_objetivo_min` solo con un rango elegido; `subtitulos` y `gancho` solo si la persona dijo Si o No
- * (en Auto no van, y decide el motor).
+ * Lo que va a `spec.opciones` (el contrato con el motor): `formato` y `capitulos` siempre; con un rango
+ * elegido, `duracion_rango_min` ([minimo, maximo] en minutos) y `duracion_objetivo_min` (el maximo: el motor
+ * corta hasta caber); `subtitulos` y `gancho` solo si la persona dijo Si o No (en Auto no van, y decide el motor).
  */
-export function opcionesDelSpec(o: OpcionesVideo): Record<string, number | boolean | string> {
-  const r: Record<string, number | boolean | string> = { formato: o.formato, capitulos: o.capitulos }
-  if (o.duracion !== "auto") r.duracion_objetivo_min = MINUTOS[o.duracion]
+export function opcionesDelSpec(o: OpcionesVideo): Record<string, number | boolean | string | number[]> {
+  const r: Record<string, number | boolean | string | number[]> = { formato: o.formato, capitulos: o.capitulos }
+  if (o.duracion !== "auto") {
+    const [a, b] = RANGO_DURACION[o.duracion]
+    r.duracion_rango_min = [a, b]
+    r.duracion_objetivo_min = b
+  }
   if (o.subtitulos !== "auto") r.subtitulos = o.subtitulos === "si"
   if (o.gancho !== "auto") r.gancho = o.gancho === "si"
   return r

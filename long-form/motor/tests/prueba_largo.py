@@ -276,7 +276,11 @@ def prueba_audio_con_gancho():
 def prueba_duracion_objetivo():
     assert plan.pedido_duracion(900, None) is None
     assert plan.pedido_duracion(610, 600) is None                         # dentro del 3 %: ya esta
-    assert plan.pedido_duracion(900, 600) == {'estimada_s': 900, 'objetivo_s': 600}
+    assert plan.pedido_duracion(900, 600) == {'estimada_s': 900, 'objetivo_s': 600, 'modo': 'cortes'}
+    # con rango: el piso viaja; mucho mas corto que el material (menos del 40 %): se elige lo que queda
+    assert plan.pedido_duracion(900, 600, 480)['minimo_s'] == 480
+    assert plan.pedido_duracion(3600, 60, 30)['modo'] == 'seleccion'
+    assert plan.pedido_duracion(1000, 400)['modo'] == 'cortes' and plan.pedido_duracion(1000, 399)['modo'] == 'seleccion'
     # silencios: un nivel mas apretado cada vez, hasta 'fuerte'
     assert plan.apretar_silencios(0.3, 1.0, 0.3)[0] == 'normal'
     nivel, v = plan.apretar_silencios(0.35, 0.6, 0.18)
@@ -289,6 +293,37 @@ def prueba_duracion_objetivo():
     assert 'duracion' in e['properties']['cortes']['items']['properties']['tipo']['enum']
     assert 'duracion' not in G.ESQUEMA['properties']['cortes']['items']['properties']['tipo']['enum']   # sin tocar el base
     assert G.esquema() is G.ESQUEMA and 'gancho' in G.esquema(gancho=True)['properties']
+    # con rango, Claude sabe el piso; en modo seleccion pide los tramos que se quedan
+    txt = G.pedidos_extra(duracion={'estimada_s': 900, 'objetivo_s': 600, 'minimo_s': 480, 'modo': 'cortes'})[0]
+    assert 'entre 8 y 10 min' in txt and 'sin bajar de 8 min' in txt, txt
+    txt = G.pedidos_extra(duracion={'estimada_s': 3600, 'objetivo_s': 60, 'minimo_s': 30, 'modo': 'seleccion'})[0]
+    assert '"seleccion"' in txt and 'entre 0,5 y 1 min' in txt and 'frase completa' in txt, txt
+    e = G.esquema(duracion={'modo': 'seleccion'})
+    assert 'seleccion' in e['required'] and 'seleccion' in e['properties'] and 'seleccion' not in G.ESQUEMA['properties']
+    assert 'seleccion' not in G.esquema(duracion={'modo': 'cortes'})['properties']
+
+
+def prueba_seleccion_a_cortes():
+    # se quedan 10-20 y 50-60 (y uno que se pisa con el segundo); lo demas se corta
+    c = G.seleccion_a_cortes([{'inicio': 50, 'fin': 60}, {'inicio': 10, 'fin': 20}, {'inicio': 55, 'fin': 65}], 100)
+    assert [(x['inicio'], x['fin']) for x in c] == [(0.0, 10.0), (20.0, 50.0), (65.0, 100.0)], c
+    assert all(x['tipo'] == 'duracion' for x in c)
+    # huecos de menos de 1 s no se cortan; lo que pasa del final se recorta
+    c = G.seleccion_a_cortes([{'inicio': 0.5, 'fin': 30}, {'inicio': 30.4, 'fin': 200}], 100)
+    assert c == [], c
+    # sin seleccion o con basura: nada
+    assert G.seleccion_a_cortes(None, 100) == [] and G.seleccion_a_cortes([{'inicio': 'x'}], 100) == []
+
+
+def prueba_rango_de_duracion():
+    import types
+    def ctx(opciones):
+        return types.SimpleNamespace(eleccion=lambda k, d: opciones.get(k, d))
+    assert plan.rango_s(ctx({'duracion_rango_min': [8, 15], 'duracion_objetivo_min': 15})) == (480, 900)
+    assert plan.rango_s(ctx({'duracion_objetivo_min': 17.5})) == (None, 1050)        # proyecto de antes del rango
+    assert plan.rango_s(ctx({})) == (None, None)
+    assert plan.rango_s(ctx({'duracion_rango_min': [15, 8]})) == (None, None)       # rango al reves: no vale
+    assert plan.objetivo_s(ctx({'duracion_rango_min': [0.5, 1]})) == 60
 
 
 def prueba_cortes_por_duracion_a_frases_completas():
