@@ -8,6 +8,7 @@ import { avisar, avisosDe, BUCKET, marcarLeidos, proyectoDe, urlsFirmadas, type 
 import { encolarEtapa } from "@/engine/long-form/motor"
 import { formatoPorNombre, MENSAJE_FORMATO } from "@/engine/long-form/audio"
 import { specDesdeEstilo, type SpecProyecto } from "@/engine/long-form/proyectos"
+import { rutaReferente, validarUrlReferente, VIDEO_REFERENTE } from "@/engine/long-form/referente"
 import { TIPOS_GRABACION } from "@/engine/long-form/tipos"
 import { supabaseAdmin } from "@/engine/supabase-admin"
 import { cuentaActual } from "@/lib/accounts"
@@ -64,6 +65,13 @@ export type Subida = { archivoId: string; nombre: string; ruta: string; token: s
 export type DestinoSubida = { endpoint: string; apikey: string; bucket: string }
 
 /**
+ * El referente de edicion (opcional): un video que se sube como los demas, con tipo explicito 'referente' (no
+ * pasa por `tipoDe`: un .mp4 suelto seria una fuente), o un enlace que queda en spec.referente_url. Solo se usa
+ * para medir su estilo; nada suyo llega al video.
+ */
+export type ReferenteNuevo = { nombre: string; bytes: number } | { url: string }
+
+/**
  * Nuevo video: crea el proyecto con sus archivos pendientes y da una firma de un solo uso por archivo.
  * El navegador sube directo a Storage por TUS; el archivo no pasa por Studio.
  */
@@ -75,6 +83,7 @@ export async function crearProyecto(datos: {
   archivos: Entrada[]
   /** Musica elegida de la biblioteca de la marca para este video (ids de `lf_biblioteca`), por uso. */
   musicaBiblioteca?: Partial<Record<UsoMusica, string>>
+  referente?: ReferenteNuevo | null
 }): Promise<Hecho<{ id: string; subidas: Subida[]; destino: DestinoSubida }>> {
   try {
     const accountId = await idDeCuentaCon("long_form")
@@ -90,10 +99,15 @@ export async function crearProyecto(datos: {
     if (!tipos.includes("fuente")) return { ok: false, error: "Agrega al menos un video." }
     const repetido = USOS_MUSICA.find((u) => datos.archivos.filter((a) => a.uso === u).length + (datos.musicaBiblioteca?.[u] ? 1 : 0) > 1)
     if (repetido) return { ok: false, error: `Elige una sola música de ${repetido === "intro" ? "inicio" : repetido}.` }
+    const ref = referenteValido(datos.referente)
+    if (!ref.ok) return ref
 
     const estilo = await estiloDe(accountId)
     if (!estilo?.listo) return { ok: false, error: "Primero confirma el estilo de long form en Marca." }
-    const spec: SpecProyecto & Record<string, unknown> = specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name })
+    const spec: SpecProyecto & Record<string, unknown> = {
+      ...specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name }),
+      ...(ref.url ? { referente_url: ref.url } : {}),
+    }
 
     const db = supabaseAdmin()
     // La musica elegida de la biblioteca: el motor la baja de Storage por su ruta (render.py, `musica_<uso>`).
@@ -116,12 +130,17 @@ export async function crearProyecto(datos: {
     const id = (p as { id: string }).id
 
     let n = 0
-    const filas = datos.archivos.map((a, i) => {
+    const filas: { account_id: string; proyecto_id: string; tipo: string; nombre: string; ruta: string; bytes: number; rol: string | null; subida: string }[] = datos.archivos.map((a, i) => {
       const tipo = tipos[i]!
       // El rol: la letra de cada video, o para que es cada musica (render.py la busca por ese rol).
       const rol = tipo === "fuente" ? CLAVES_FUENTE[n++] : tipo === "musica" ? a.uso! : null
       return { account_id: accountId, proyecto_id: id, tipo, nombre: a.nombre.slice(0, 200), ruta: `${accountId}/${id}/entrada/${i + 1}-${limpio(a.nombre)}`, bytes: a.bytes, rol, subida: "pendiente" }
     })
+    // El referente es un archivo mas del proyecto, con su tipo explicito y su propia ruta.
+    if (ref.archivo) {
+      const { nombre, bytes } = ref.archivo
+      filas.push({ account_id: accountId, proyecto_id: id, tipo: "referente", nombre: nombre.slice(0, 200), ruta: rutaReferente(accountId, id, limpio(nombre)), bytes, rol: null, subida: "pendiente" })
+    }
     const { data: insertados, error: e2 } = await db.from("lf_archivos").insert(filas).select("id, nombre, ruta")
     if (e2) return { ok: false, error: `No se pudieron registrar los archivos: ${e2.message}` }
 
@@ -136,6 +155,20 @@ export async function crearProyecto(datos: {
   } catch (e) {
     return fallo(e)
   }
+}
+
+/** El referente que pide la persona, ya revisado: un video subido o un enlace publico. */
+function referenteValido(r: ReferenteNuevo | null | undefined): { ok: true; archivo?: { nombre: string; bytes: number }; url?: string } | { ok: false; error: string } {
+  if (!r) return { ok: true }
+  if ("url" in r) {
+    const v = validarUrlReferente(String(r.url ?? ""))
+    return v.ok ? { ok: true, url: v.url } : v
+  }
+  const nombre = String(r.nombre ?? "")
+  const bytes = Number(r.bytes)
+  if (!VIDEO_REFERENTE.test(nombre)) return { ok: false, error: `${nombre || "El referente"} no es un video (mp4, mov, m4v, mkv o webm).` }
+  if (!Number.isFinite(bytes) || bytes <= 0) return { ok: false, error: "El video de referencia está vacío." }
+  return { ok: true, archivo: { nombre, bytes } }
 }
 
 /** A donde sube el navegador. En Supabase en la nube, el dominio de Storage directo aguanta archivos grandes. */
@@ -251,6 +284,28 @@ export async function cambiarTipo(id: string, tipo: string): Promise<Hecho> {
       .eq("id", id)
     if (error) return { ok: false, error: `No se pudo cambiar: ${error.message}` }
     await encolarEtapa(id, "analisis")
+    revalidatePath(`/long-form/${id}`)
+    return { ok: true }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+/**
+ * El referente fallo (un enlace que el servidor no baja, un archivo que no se lee): el video sigue sin el. Queda
+ * anotado en spec.sin_referente y la etapa referente vuelve a correr, esta vez sin hacer nada.
+ */
+export async function seguirSinReferente(id: string): Promise<Hecho> {
+  try {
+    const { p } = await proyectoPropio(id)
+    const fallido = p.trabajos.find((t) => t.estado === "error")
+    if (p.tablero !== "error" || fallido?.etapa !== "referente") return { ok: false, error: "El referente no está fallando." }
+    const { error } = await supabaseAdmin()
+      .from("lf_proyectos")
+      .update({ spec: { ...p.spec, sin_referente: true }, tablero: "procesando", fase: "en_cola", detalle: "referente" })
+      .eq("id", id)
+    if (error) return { ok: false, error: `No se pudo seguir: ${error.message}` }
+    await encolarEtapa(id, "referente")
     revalidatePath(`/long-form/${id}`)
     return { ok: true }
   } catch (e) {

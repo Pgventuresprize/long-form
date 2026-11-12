@@ -29,8 +29,22 @@ class Contexto:
         self.reconstruyendo = False     # rehaciendo una etapa ya hecha en otro worker: sin IA, sin pisar lo aprobado
 
     # ---- opciones con valor por defecto
+    @property
+    def referente(self):
+        """Los parametros que dejo la etapa referente (etapas/referente.py), o {} si el proyecto no tiene."""
+        return (self.estado.get('referente') or {}).get('parametros') or {}
+
     def opcion(self, clave, defecto):
+        """Lo que pide el referente manda sobre el estilo de la marca: la persona lo eligio para este video."""
+        ref = self.referente
+        if clave in ref:
+            return ref[clave]
         return (self.spec.get('opciones') or {}).get(clave, defecto)
+
+    def regla(self, clave, defecto):
+        """Como marca.regla, pero con lo que pide el referente encima (cadencia de barras y pop-ups)."""
+        ref = self.referente
+        return ref[clave] if clave in ref else self.marca.regla(clave, defecto)
 
     @property
     def tipo(self):

@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { NIVELES, NOMBRE_NIVEL, type Nivel } from "@/engine/long-form/estilo"
+import { esRutaReferente, VIDEO_REFERENTE } from "@/engine/long-form/referente"
 
 import { useSubidas } from "./subidas"
 
@@ -39,6 +40,7 @@ export function NuevoVideo({ ctas, nivelDefecto, ctaDefecto }: { ctas: { clave: 
   const [notas, setNotas] = React.useState("")
   const [cta, setCta] = React.useState<string>(ctaDefecto ?? "")
   const [encima, setEncima] = React.useState(false)
+  const [referente, setReferente] = React.useState<Referente>({ modo: "ninguno", archivo: null, url: "" })
   const [error, setError] = React.useState<string | null>(null)
   const [ocupado, start] = React.useTransition()
   const entrada = React.useRef<HTMLInputElement>(null)
@@ -53,20 +55,23 @@ export function NuevoVideo({ ctas, nivelDefecto, ctaDefecto }: { ctas: { clave: 
   const empezar = () =>
     start(async () => {
       setError(null)
-      const r = await crearProyecto({ titulo, esfuerzo: nivel, notas, ctaDefecto: cta || null, archivos: archivos.map((a) => ({ nombre: a.name, bytes: a.size })) })
+      const ref = referente.modo === "archivo" && referente.archivo ? { nombre: referente.archivo.name, bytes: referente.archivo.size } : referente.modo === "enlace" && referente.url.trim() ? { url: referente.url.trim() } : null
+      const r = await crearProyecto({ titulo, esfuerzo: nivel, notas, ctaDefecto: cta || null, archivos: archivos.map((a) => ({ nombre: a.name, bytes: a.size })), referente: ref })
       if (!r.ok) return setError(r.error)
-      // Cada firma con su archivo: la ruta lleva su posicion en la lista ("entrada/3-nombre.mp4").
+      // Cada firma con su archivo: la ruta lleva su posicion en la lista ("entrada/3-nombre.mp4"); la del referente,
+      // su prefijo ("entrada/referente-nombre.mp4").
       iniciar(
         r.id,
         r.destino,
         r.subidas,
-        r.subidas.map((s) => archivos[Number(/\/entrada\/(\d+)-/.exec(s.ruta)?.[1] ?? 1) - 1])
+        r.subidas.map((s) => (esRutaReferente(s.ruta) && referente.archivo ? referente.archivo : archivos[Number(/\/entrada\/(\d+)-/.exec(s.ruta)?.[1] ?? 1) - 1]))
       )
       router.push(`/long-form/${r.id}`)
     })
 
   const videos = archivos.filter((a) => /^video\//.test(a.type) || /\.(mp4|mov|m4v|mkv|webm)$/i.test(a.name)).length
-  const valido = videos > 0 && titulo.trim().length > 0
+  const refIncompleto = (referente.modo === "archivo" && !referente.archivo) || (referente.modo === "enlace" && !referente.url.trim())
+  const valido = videos > 0 && titulo.trim().length > 0 && !refIncompleto
 
   return (
     <div className="flex max-w-3xl flex-col gap-5">
@@ -127,6 +132,8 @@ export function NuevoVideo({ ctas, nivelDefecto, ctaDefecto }: { ctas: { clave: 
         <Opciones etiqueta="CTA por defecto" valor={cta} opciones={[...ctas.map((c) => ({ valor: c.clave, nombre: c.nombre })), { valor: "", nombre: "Sin preferencia" }]} onCambio={setCta} ayuda="Es el que más sale en las barras del video y en los clips." />
       ) : null}
 
+      <CampoReferente valor={referente} onCambio={setReferente} deshabilitado={ocupado} />
+
       {error ? (
         <p className="text-destructive text-sm" role="alert">
           {error}
@@ -137,7 +144,74 @@ export function NuevoVideo({ ctas, nivelDefecto, ctaDefecto }: { ctas: { clave: 
           {ocupado ? "Preparando..." : "Empezar"}
         </Button>
         {!videos && archivos.length ? <span className="text-muted-foreground text-sm">Falta al menos un video.</span> : null}
+        {refIncompleto ? <span className="text-muted-foreground text-sm">Falta el referente, o elige «Sin referente».</span> : null}
       </div>
+    </div>
+  )
+}
+
+type Referente = { modo: "ninguno" | "archivo" | "enlace"; archivo: File | null; url: string }
+
+/**
+ * El referente de edicion, opcional: un video cuya edicion se quiere imitar. Subirlo es el camino normal; el
+ * enlace solo sirve si el servidor puede bajarlo. Se mantiene aparte del resto del formulario a proposito: esta
+ * pantalla se va a rediseñar y el campo tiene que poder moverse entero.
+ */
+function CampoReferente({ valor, onCambio, deshabilitado }: { valor: Referente; onCambio: (r: Referente) => void; deshabilitado: boolean }) {
+  const entrada = React.useRef<HTMLInputElement>(null)
+  const [aviso, setAviso] = React.useState<string | null>(null)
+  const elegir = (lista: FileList | null) => {
+    const f = lista?.[0]
+    if (!f) return
+    if (!VIDEO_REFERENTE.test(f.name)) return setAviso(`${f.name} no es un video (mp4, mov, m4v, mkv o webm).`)
+    setAviso(null)
+    onCambio({ ...valor, archivo: f })
+  }
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border p-4">
+      <Opciones
+        etiqueta="Referente de edición (opcional)"
+        valor={valor.modo}
+        opciones={[
+          { valor: "ninguno", nombre: "Sin referente" },
+          { valor: "archivo", nombre: "Subir un video" },
+          { valor: "enlace", nombre: "Pegar un enlace" },
+        ]}
+        onCambio={(modo) => onCambio({ ...valor, modo })}
+        ayuda="Un video cuya edición te gusta. Studio mide su ritmo, sus planos y sus pausas, y edita el tuyo así. Nada del referente aparece en tu video."
+      />
+      {valor.modo === "archivo" ? (
+        valor.archivo ? (
+          <div className="flex items-center gap-3 rounded-lg border px-3 py-2 text-sm">
+            <FileVideoIcon className="text-muted-foreground size-4 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{valor.archivo.name}</span>
+            <span className="text-muted-foreground shrink-0 tabular-nums">{tamano(valor.archivo.size)}</span>
+            <Button type="button" size="icon" variant="ghost" aria-label={`Quitar ${valor.archivo.name}`} disabled={deshabilitado} onClick={() => onCambio({ ...valor, archivo: null })}>
+              <XIcon />
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" disabled={deshabilitado} onClick={() => entrada.current?.click()}>
+              <UploadCloudIcon />
+              Elegir el video de referencia
+            </Button>
+            <input ref={entrada} type="file" accept=".mp4,.mov,.m4v,.mkv,.webm,video/*" className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => elegir(e.target.files)} />
+          </div>
+        )
+      ) : null}
+      {valor.modo === "enlace" ? (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="lf-referente-url">Enlace del video</Label>
+          <Input id="lf-referente-url" type="url" inputMode="url" value={valor.url} maxLength={500} disabled={deshabilitado} onChange={(e) => onCambio({ ...valor, url: e.target.value })} placeholder="https://..." />
+          <p className="text-muted-foreground text-xs">Si el servidor no puede bajarlo, te pediremos el archivo. Subir el video es lo más seguro.</p>
+        </div>
+      ) : null}
+      {aviso ? (
+        <p className="text-destructive text-sm" role="alert">
+          {aviso}
+        </p>
+      ) : null}
     </div>
   )
 }

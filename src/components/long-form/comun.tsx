@@ -19,6 +19,7 @@ const FASE_A_PASO: Record<string, number> = {
   borrador: 0,
   en_cola: 1,
   ingesta: 1,
+  referente: 1,
   analisis: 1,
   clasificar: 1,
   transcripcion: 1,
@@ -61,6 +62,7 @@ export function quienActua(p: Pick<ProyectoResumen, "tablero" | "fase">): { text
 const ETAPAS: Record<string, string> = {
   en_cola: "En cola",
   ingesta: "Leyendo los archivos",
+  referente: "Analizando el referente",
   analisis: "Analizando quién habla",
   clasificar: "Reconociendo el tipo de grabación",
   transcripcion: "Transcribiendo",

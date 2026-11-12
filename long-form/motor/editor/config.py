@@ -13,6 +13,10 @@ SUBTITULOS = MOTOR / 'subtitulos'
 FFMPEG = os.environ.get('FFMPEG', 'ffmpeg')
 FFPROBE = os.environ.get('FFPROBE', 'ffprobe')
 
+# yt-dlp, solo para el referente por enlace. Vacio por defecto: bajar de YouTube, TikTok o Instagram choca
+# con sus terminos, asi que el camino normal es subir el archivo. Quien opere el motor lo enciende a proposito.
+YTDLP = os.environ.get('LF_YTDLP', '')
+
 # carpeta de trabajo: es una cache. La verdad vive en la base y el almacenamiento.
 DATOS = Path(os.environ.get('LF_DATOS', '/data' if Path('/data').exists() else str(MOTOR / '.datos')))
 

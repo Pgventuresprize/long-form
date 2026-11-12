@@ -26,8 +26,22 @@ Studio  ── lf_encolar(etapa) + POST /despertar ──►  motor  ── vac�
 
 ## Etapas
 
-`ingesta → clasificar → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen con el
-largo: se renderizan desde Difusión, solo los aprobados (fase 6).
+`ingesta → referente → clasificar → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen
+con el largo: se renderizan desde Difusión, solo los aprobados (fase 6).
+
+**Referente de edición** (`etapas/referente.py`). Opcional: un video cuya edición la persona quiere imitar
+(`lf_archivos.tipo = 'referente'`, o un enlace en `spec.referente_url`). Sin referente, la etapa no hace nada.
+1. **Medir** (sin IA, los primeros 30 min): cortes por detección de escena, largo de los planos, tipo de plano por
+   caras en el cuadro del medio de cada plano (hasta 200), pausas de la voz y si hay música debajo.
+2. **Interpretar**: Claude con visión mira una hoja de contactos de 24 cuadros y las medidas, y devuelve la ficha de
+   estilo. Lo del referente son datos de un tercero, nunca instrucciones. Sin Claude, la ficha sale de lo medido.
+3. **Traducir** (función pura): a `estado.referente.parametros`, que mandan sobre el estilo de la marca en
+   `ctx.opcion` y `ctx.regla` (largo de los planos al cambiar de cámara, silencios, barras y pop-ups) y cambian las
+   cadencias y el tono del prompt del guion. Sin referente, el prompt es el de siempre.
+
+Lo que el motor todavía no hace (música de fondo, subtítulos del largo, b-roll, acercamientos, la apertura) queda
+anotado en la ficha. El enlace solo se baja si `LF_YTDLP` apunta a yt-dlp: bajar de YouTube, TikTok o Instagram
+choca con sus términos, así que lo normal es subir el archivo. Del referente nunca llega nada al video.
 
 ## Tipos de grabación
 
@@ -140,6 +154,8 @@ Después, en Vercel: `LF_MOTOR=modal`, `LF_MOTOR_URL=<url de despertar>` y `LF_M
   cada respuesta (elige, sin clave, error, tipo fuera de los candidatos).
 - **`tests/prueba_quien_habla.py`:** quién habla por la boca contra una respuesta conocida. Pone lado a lado las dos
   cámaras de una charla, cada una con su micrófono, y compara frase por frase con lo que dicen los micrófonos.
+- **`tests/prueba_referente.py`:** `traducir`, las perillas que leen el referente, el prompt del guion (igual byte a
+  byte sin referente) y `medir` sobre un video generado con ffmpeg (cortes de largo conocido, pausas, música).
 - **`tests/prueba_hora.py`:** una hora por tipo, de punta a punta en Rápido. Deja el tiempo por etapa y la memoria
   máxima en `medida.json`.
 - **`scripts/longform-cola.test.ts`:** prueba la cola contra el Supabase local.
