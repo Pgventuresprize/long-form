@@ -22,6 +22,7 @@ import type { Audio } from "@/engine/long-form/estilo-datos"
 
 import { SelectorAudio, sfxDeStudio } from "./audio"
 import { Campo, ColorCampo, Opciones, Seccion, SubirArchivo } from "./campos"
+import { IntroYCierre } from "./extremos"
 import { VistaPrevia } from "./vista-previa"
 
 export type FuenteDisponible = { clave: string; nombre: string; fuente: Fuente }
@@ -123,7 +124,7 @@ export function EditorEstilo({
         </div>
       </Seccion>
 
-      <Seccion titulo="Logo y datos de cierre" descripcion="El logo va en las tarjetas de intro y cierre, sobre el color de acento.">
+      <Seccion titulo="Logo y redes" descripcion="El logo va en las tarjetas de intro y cierre, sobre el color de acento. Tu usuario y tu web salen en el cierre y en los pop-ups.">
         <div className="flex flex-wrap items-center gap-3">
           <SubirArchivo clase="logo" etiqueta={e.logo.sobre_acento ? "Cambiar logo" : "Subir logo"} acepta={`${ACEPTA_IMAGEN},image/svg+xml`} onSubido={(a) => set("logo", { ...e.logo, sobre_acento: a })} />
           {e.logo.sobre_acento ? (
@@ -137,11 +138,13 @@ export function EditorEstilo({
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Campo etiqueta="Usuario en redes" valor={e.handle} max={40} placeholder="@tumarca" onCambio={(v) => set("handle", v)} />
           <Campo etiqueta="Web" valor={e.web} max={80} placeholder="tumarca.com" onCambio={(v) => set("web", v)} />
-          <Campo etiqueta="Pie de la intro" valor={e.textos.pie_intro} max={60} onCambio={(v) => set("textos", { ...e.textos, pie_intro: v })} />
-          <Campo etiqueta="Título del cierre" valor={e.textos.cierre_titulo} max={40} onCambio={(v) => set("textos", { ...e.textos, cierre_titulo: v })} />
           <Campo etiqueta="Texto del pop-up" valor={e.textos.popup} max={30} onCambio={(v) => set("textos", { ...e.textos, popup: v })} />
           <Campo etiqueta="Etiqueta de las preguntas" valor={e.textos.pregunta} max={20} onCambio={(v) => set("textos", { ...e.textos, pregunta: v })} />
         </div>
+      </Seccion>
+
+      <Seccion titulo="Intro y cierre" descripcion="Cómo empieza y cómo termina cada video. Al crear un video puedes quitarlos.">
+        <IntroYCierre estilo={e} onCambio={setE} />
       </Seccion>
 
       <Seccion titulo="CTA de video" descripcion="Las barras que aparecen durante el video, con su QR. Lo que pongas entre *asteriscos* se resalta.">
