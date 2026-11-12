@@ -82,6 +82,18 @@ def prueba_traducir_graficos():
     # sin IA no se sabe nada de los graficos: no se pone ni se quita nada
     sin = R.traducir(metricas(), R.ficha_sin_ia(metricas()))
     assert not {'barra_cada_min', 'cita_cada_min', 'preguntas'} & set(sin), sin
+    assert not {'sugerido_subtitulos', 'sugerido_gancho', 'broll_cada_min'} & set(sin), sin
+
+
+def prueba_traducir_sugerencias():
+    p = R.traducir(metricas(), ficha())
+    assert p['sugerido_subtitulos'] is True and p['sugerido_gancho'] is True and p['broll_cada_min'] == 1.5, p
+    q = R.traducir(metricas(), ficha(apertura={'tipo': 'directo'}, subtitulos={'presentes': False},
+                                     broll={'usa': True, 'cada_min': 30}))
+    assert q['sugerido_gancho'] is False and q['sugerido_subtitulos'] is False and q['broll_cada_min'] == 10.0, q
+    assert 'broll_cada_min' not in R.traducir(metricas(), ficha(broll={'usa': False, 'cada_min': None}))
+    # no chocan con las perillas de ctx.opcion: ninguna se llama como una opcion de Studio
+    assert not {'subtitulos', 'gancho', 'formato', 'capitulos'} & set(p)
 
 
 def prueba_traducir_es_puro():
@@ -144,7 +156,10 @@ def prueba_resumen_para_la_tarjeta():
     assert any('Silencios: corte fuerte' in a for a in r['aplica']), r['aplica']
     assert any('primer plano 4,2 s' in a for a in r['aplica'])
     # lo que el motor todavia no hace queda anotado, no aplicado
-    assert r['pendiente'] == ['un gancho al abrir', 'música de fondo bajo', 'subtítulos en el video largo', 'b-roll cada 1,5 min']
+    assert r['pendiente'] == ['música de fondo bajo']
+    # gancho, subtitulos y b-roll ya se hacen: van como sugerencias (manda lo que la persona elija en Studio)
+    for a in ('Abre con un gancho', 'Subtítulos en el video largo', 'más o menos cada 1,5 min'):
+        assert any(a in x for x in r['aplica']), (a, r['aplica'])
     sin = R.resumen(m, R.ficha_sin_ia(m), R.traducir(m, R.ficha_sin_ia(m)))
     assert not any('Citas' in a for a in sin['aplica'])
 

@@ -12,10 +12,11 @@ cuadro, sonido ni texto suyo llega al video que se entrega.
    la ficha sale solo de las medidas.
 3. traducir (funcion pura, con prueba): medidas y ficha a `parametros`, que leen ctx.opcion y ctx.regla
    (largo de los planos al cambiar de camara, silencios, barras, pop-ups) y el prompt del guion (citas,
-   preguntas, tono).
+   preguntas, tono). Subtitulos del largo, gancho al abrir y cadencia del b-roll van como sugerencias
+   (sugerido_subtitulos, sugerido_gancho, broll_cada_min) que ctx.eleccion usa solo si la persona dejo esa
+   opcion en automatico.
 
-Lo que el motor todavia no hace (musica de fondo, subtitulos del largo, b-roll, acercamientos, la apertura)
-queda anotado en la ficha, para que lo usen las fases siguientes.
+Lo que el motor todavia no hace (elegir la musica de fondo, acercamientos) queda anotado en la ficha.
 
 Sin referente no hace nada: guarda referente = None y sigue.
 """
@@ -459,7 +460,9 @@ def traducir(m, ficha):
     - plano_*_s (camaras.py): la mediana de cada tipo de plano (o la general si hay pocos), entre 3 y 20 s;
     - silencio_* (plan.py): el preset de estilo.SILENCIOS que corresponde a sus pausas;
     - barra_cada_min, popup_cada_min, barras_por_cta_min (guion.colocar_fijas): estilo.GRAFICOS en los extremos;
-    - cita_cada_min y preguntas (prompt del guion)."""
+    - cita_cada_min y preguntas (prompt del guion);
+    - sugerido_subtitulos, sugerido_gancho y broll_cada_min: sugerencias que ctx.eleccion usa solo si la persona
+      dejo esa opcion en automatico."""
     p = {}
     pl = m.get('planos') or {}
     if pl.get('cortes', 0) >= 3:
@@ -481,6 +484,18 @@ def traducir(m, ficha):
         p['cita_cada_min'] = round(min(max(10 / citas, 1.0), 10.0), 1) if citas > 0 else 10.0
     if isinstance(g.get('preguntas'), bool):
         p['preguntas'] = g['preguntas']
+    # Sugerencias para lo que la persona decide en Studio (subtitulos, gancho, b-roll). Van con nombres propios
+    # porque ahi manda la persona: ctx.eleccion las usa solo si la opcion quedo en automatico.
+    f = ficha or {}
+    su = f.get('subtitulos') or {}
+    if isinstance(su.get('presentes'), bool):
+        p['sugerido_subtitulos'] = su['presentes']
+    tipo = (f.get('apertura') or {}).get('tipo')
+    if tipo in APERTURAS:
+        p['sugerido_gancho'] = tipo == 'gancho'
+    br = f.get('broll') or {}
+    if br.get('usa') is True and isinstance(br.get('cada_min'), (int, float)) and br['cada_min'] > 0:
+        p['broll_cada_min'] = round(min(max(float(br['cada_min']), 0.5), 10.0), 1)
     return p
 
 
@@ -520,18 +535,21 @@ def resumen(m, ficha, p):
         aplica.append('Preguntas en pantalla solo en los cambios de tema más claros.')
     if ficha.get('tono_editorial'):
         aplica.append('El guion de gráficos sigue el tono del referente, sin inventar nada.')
+    # Sugerencias: valen si la opcion quedo en automatico al crear el video (ctx.eleccion)
+    if p.get('sugerido_gancho'):
+        aplica.append('Abre con un gancho: la frase más fuerte antes de la intro.')
+    if p.get('sugerido_subtitulos'):
+        aplica.append('Subtítulos en el video largo.')
+    if 'broll_cada_min' in p:
+        aplica.append(f"Ilustraciones de la carpeta de apoyo más o menos cada {_coma(p['broll_cada_min'])} min.")
 
     # Lo que el motor todavia no hace: se anota para las fases siguientes
     pendiente = []
-    if (ficha.get('apertura') or {}).get('tipo') == 'gancho':
-        pendiente.append('un gancho al abrir')
     if mu.get('fondo'):
         pendiente.append(f"música de fondo {mu['nivel']}")
-    if (ficha.get('subtitulos') or {}).get('presentes'):
-        pendiente.append('subtítulos en el video largo')
     br = ficha.get('broll') or {}
-    if br.get('usa'):
-        pendiente.append(f"b-roll cada {_coma(br['cada_min'])} min" if br.get('cada_min') else 'b-roll')
+    if br.get('usa') and 'broll_cada_min' not in p:
+        pendiente.append('b-roll')
     if (ficha.get('zoom') or {}).get('usa'):
         pendiente.append('acercamientos en edición')
     return {'ve': ve, 'aplica': aplica, 'pendiente': pendiente}

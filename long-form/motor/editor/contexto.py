@@ -7,6 +7,30 @@ import numpy as np
 
 from .marca import Marca
 
+# Las decisiones del video que Studio deja en spec.opciones (subtitulos, gancho...) y el nombre con que el
+# referente sugiere cada una en sus parametros (etapas/referente.traducir). Nombres distintos a proposito: en
+# ctx.opcion el referente manda, pero aqui manda la persona.
+SUGERENCIAS = {'subtitulos': 'sugerido_subtitulos', 'gancho': 'sugerido_gancho', 'broll_cada_min': 'broll_cada_min'}
+FORMATOS = ('16:9', '9:16', '1:1')
+
+
+def elegir(opciones, parametros, clave, defecto):
+    """Lo que eligio la persona (spec.opciones) > lo que sugiere el referente > el valor por defecto.
+
+    Una opcion ausente o en null es "automatico": decide el referente si dice algo, si no el defecto."""
+    v = (opciones or {}).get(clave)
+    if v is not None:
+        return v
+    sug = SUGERENCIAS.get(clave)
+    if sug and sug in (parametros or {}) and parametros[sug] is not None:
+        return parametros[sug]
+    return defecto
+
+
+def desfase(graficos):
+    """Segundos del video final antes del programa: el gancho (si hay) y la tarjeta de intro."""
+    return float(graficos.get('gancho_s') or 0) + graficos['intro_s']
+
 
 class Contexto:
     def __init__(self, almacen, pid, etapa=''):
@@ -45,6 +69,17 @@ class Contexto:
         """Como marca.regla, pero con lo que pide el referente encima (cadencia de barras y pop-ups)."""
         ref = self.referente
         return ref[clave] if clave in ref else self.marca.regla(clave, defecto)
+
+    def eleccion(self, clave, defecto):
+        """Para formato, duracion_objetivo_min, subtitulos, gancho, capitulos y broll_cada_min: aqui manda lo
+        que la persona eligio en Studio; el referente solo sugiere cuando la opcion queda en automatico."""
+        return elegir(self.spec.get('opciones'), self.referente, clave, defecto)
+
+    @property
+    def formato(self):
+        """El lienzo del video largo: '16:9' (siempre igual que antes), '9:16' o '1:1'."""
+        f = str(self.eleccion('formato', '16:9'))
+        return f if f in FORMATOS else '16:9'
 
     @property
     def tipo(self):
