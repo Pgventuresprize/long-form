@@ -846,7 +846,8 @@ class CompositorMeet:
     def __init__(self, ctx):
         self.ctx = ctx
         g = ctx.aprobado('guion') or {}
-        self.esc = Escenario(ctx, g.get('capitulos', []))
+        from ..guion import capitulos_visibles
+        self.esc = Escenario(ctx, capitulos_visibles(ctx, g))
         self.info = tipos.fuentes(ctx)[0]
         self.V = self.info['archivo']
         rep = ctx.aprobado('reparto')

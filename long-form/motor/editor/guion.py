@@ -110,15 +110,197 @@ def sistema(ctx):
     return con_referente(base, ref.get('parametros') or {}, (ref.get('ficha') or {}).get('tono_editorial') or '')
 
 
-def proponer(ctx, segs, dur, personas):
+def subidas_ilustrativas(ctx):
+    """Los archivos de apoyo que pueden ir en el video: los de tipo 'ilustracion' (la carpeta de apoyo de Studio)
+    y las fotos sueltas ('foto'), que van como ilustracion de imagen."""
+    return ctx.archivos('ilustracion') + ctx.archivos('foto')
+
+
+def nombre_archivo(a):
+    return a.get('nombre') or a['ruta'].rsplit('/', 1)[-1]
+
+
+def esquema(gancho=False, duracion=False):
+    """ESQUEMA tal cual, o con el gancho y el tipo de corte 'duracion' cuando el video los pide."""
+    if not gancho and not duracion:
+        return ESQUEMA
+    import copy
+    e = copy.deepcopy(ESQUEMA)
+    if duracion:
+        e['properties']['cortes']['items']['properties']['tipo']['enum'].append('duracion')
+    if gancho:
+        e['properties']['gancho'] = {'type': 'object', 'required': ['inicio', 'fin', 'por_que'], 'properties': {
+            'inicio': {'type': 'number', 'description': 'segundo en que empieza la frase'},
+            'fin': {'type': 'number', 'description': 'segundo en que termina; entre 5 y 20 s despues del inicio'},
+            'por_que': {'type': 'string', 'description': 'por que engancha, en una frase'}}}
+    return e
+
+
+def pedidos_extra(gancho=False, duracion=None, broll_min=None, n_ilustraciones=0):
+    """Lo que se agrega al pedido del guion segun lo que eligio la persona (o sugiere el referente). Sin nada de
+    esto el pedido es el de siempre. `duracion`: {'estimada_s', 'objetivo_s'} cuando el video sobra."""
+    out = []
+    if gancho:
+        out.append('GANCHO: elige la frase más fuerte del video para abrirlo antes de la intro (en "gancho"): de 5 a '
+                   '20 s, una idea completa que se entienda sola y despierte curiosidad, que empiece y termine en frase '
+                   'completa. Que no esté en un tramo que propones cortar ni en uno sensible.')
+    if duracion:
+        est, obj = duracion['estimada_s'], duracion['objetivo_s']
+        out.append(f'DURACIÓN: el video editado dura unos {_coma(est / 60)} min y quien pidió la edición quiere unos '
+                   f'{_coma(obj / 60)} min. Propón además cortes de tipo "duracion" en los tramos que menos aportan '
+                   f'(repeticiones, divagaciones, ejemplos de más) hasta sumar unos {_coma(max(est - obj, 0) / 60)} min. '
+                   'Cada corte empieza y termina en frase completa, nunca a mitad de una idea; en "motivo" di qué se '
+                   'pierde. No cortes donde pones una cita, una pregunta o el gancho.')
+    if broll_min and n_ilustraciones:
+        out.append(f'RITMO DE ILUSTRACIONES: reparte los archivos ilustrativos a lo largo del video, más o menos uno cada '
+                   f'{_coma(broll_min)} min, cada uno donde se habla de lo que muestra (si no se nota de qué trata, donde '
+                   'mejor acompañe). Usa cada archivo una sola vez.')
+    return out
+
+
+def proponer(ctx, segs, dur, personas, gancho=False, duracion=None, broll_min=None):
     nombres = ', '.join(f"{p['nombre']} ({p.get('rol') or 'sin rol'})" for p in personas if p.get('nombre'))
-    ilus = [a.get('nombre') or a['ruta'].rsplit('/', 1)[-1] for a in ctx.archivos('ilustracion')]
+    ilus = [nombre_archivo(a) for a in subidas_ilustrativas(ctx)]
+    extra = pedidos_extra(gancho, duracion, broll_min, len(ilus))
     cuerpo = (f"Título: {ctx.spec.get('titulo')}\nDuración: {dur / 60:.0f} min\nPersonas: {nombres}\n"
               f"Notas editoriales de quien pidió la edición: {ctx.spec.get('notas_editoriales') or 'ninguna'}\n"
-              f"Archivos ilustrativos disponibles: {', '.join(ilus) if ilus else 'ninguno'}\n\n"
-              f"Transcripción:\n{ia.texto_transcripcion(segs)}")
-    r = ia.pedir_json(sistema(ctx), cuerpo, ESQUEMA, 'guion', max_tokens=16000)
+              f"Archivos ilustrativos disponibles: {', '.join(ilus) if ilus else 'ninguno'}\n"
+              + ''.join(f'{x}\n' for x in extra) +
+              f"\nTranscripción:\n{ia.texto_transcripcion(segs)}")
+    r = ia.pedir_json(sistema(ctx), cuerpo, esquema(gancho, bool(duracion)), 'guion', max_tokens=16000)
     return r
+
+
+# ---------------------------------------------------------------- gancho, duracion e ilustraciones
+GANCHO_MIN, GANCHO_MAX = 5.0, 20.0
+
+
+def _choca(a, b, tramos):
+    return any(x < b and y > a for x, y in tramos)
+
+
+def ajustar_gancho(gancho, segs, prohibidos, fin):
+    """El gancho que propuso Claude, a frases completas y entre 5 y 20 s. None si no sirve (vacio, dentro de un
+    tramo cortado o sensible). Tiempos en la linea maestra, como todo el guion."""
+    if not isinstance(gancho, dict):
+        return None
+    try:
+        a, b = float(gancho['inicio']), float(gancho['fin'])
+    except (KeyError, TypeError, ValueError):
+        return None
+    a, b = max(0.0, min(a, fin)), max(0.0, min(b, fin))
+    if b <= a:
+        return None
+    orden = sorted(segs, key=lambda s: s['inicio'])
+    # las frases cuyo centro cae dentro; si ninguna, la que contiene el inicio
+    dentro = [s for s in orden if a <= (s['inicio'] + s['fin']) / 2 <= b]
+    if not dentro:
+        dentro = [s for s in orden if s['inicio'] <= a < s['fin']]
+    if not dentro:
+        return None
+    i0 = orden.index(dentro[0])
+    j = orden.index(dentro[-1])
+    # corto: se suma la frase que sigue (si viene seguida, sin una pausa larga)
+    while orden[j]['fin'] - orden[i0]['inicio'] < GANCHO_MIN and j + 1 < len(orden) and orden[j + 1]['inicio'] - orden[j]['fin'] < 1.5:
+        j += 1
+    # largo: se quitan frases del final mientras quede mas de una
+    while orden[j]['fin'] - orden[i0]['inicio'] > GANCHO_MAX and j > i0:
+        j -= 1
+    ini, fin_g = orden[i0]['inicio'], orden[j]['fin']
+    revisar = ''
+    if fin_g - ini > GANCHO_MAX:
+        fin_g = ini + GANCHO_MAX           # una sola frase de mas de 20 s: se corta y se avisa
+        revisar = 'La frase dura más de 20 s: el gancho se corta antes de que termine.'
+    elif fin_g - ini < GANCHO_MIN:
+        revisar = 'Dura menos de 5 s: mira si se entiende solo.'
+    if _choca(ini, fin_g, prohibidos):
+        return None
+    out = {'inicio': round(ini, 2), 'fin': round(fin_g, 2), 'por_que': str(gancho.get('por_que') or ''),
+           'texto': ' '.join(s['texto'].strip() for s in orden[i0:j + 1])[:400]}
+    if revisar:
+        out['revisar'] = revisar
+    return out
+
+
+def ajustar_cortes_duracion(cortes, segs):
+    """Los cortes por duracion, a frases completas: el corte va del inicio de la primera frase cuyo centro cae
+    dentro al final de la ultima. Si no queda ninguna frase entera, el corte se descarta."""
+    orden = sorted(segs, key=lambda s: s['inicio'])
+    out = []
+    for c in cortes:
+        if c.get('tipo') != 'duracion':
+            out.append(c)
+            continue
+        dentro = [s for s in orden if c['inicio'] <= (s['inicio'] + s['fin']) / 2 <= c['fin']]
+        if not dentro:
+            continue
+        out.append({**c, 'inicio': round(dentro[0]['inicio'], 2), 'fin': round(dentro[-1]['fin'], 2)})
+    return out
+
+
+def dentro_de(t, tramos):
+    return next(((a, b) for a, b in tramos if a <= t < b), None)
+
+
+def respetar_cortes_duracion(g):
+    """Lo que Claude dejo dentro de un corte por duracion no se pierde en silencio: la cita se apaga con una nota y
+    la pregunta o el capitulo empiezan donde termina el corte."""
+    tramos = [(c['inicio'], c['fin']) for c in g.get('cortes', []) if c.get('tipo') == 'duracion' and c.get('aplicar')]
+    if not tramos:
+        return g
+    for c in g.get('citas', []):
+        if dentro_de(c['t'], tramos):
+            c['omitir'] = True
+            c['revisar'] = (c.get('revisar', '') + ' Queda dentro de un corte por duración.').strip()
+    for clave in ('preguntas', 'capitulos'):
+        for x in g.get(clave, []):
+            t = dentro_de(x['inicio'], tramos)
+            if t and x['inicio'] > 0:
+                x['inicio'] = t[1]
+    return g
+
+
+def ubicar_ilustraciones(ilus, segs, fin, cada_s=None, prohibidos=(), separacion=20.0):
+    """A las ilustraciones sin momento (Claude no las ubico, o no hay Claude) se les busca uno: con cadencia,
+    una cada `cada_s` segundos; sin ella, repartidas en todo el video. Siempre al empezar una frase, lejos de las
+    otras ilustraciones y fuera de los tramos cortados. Devuelve la lista con 't' y una nota para revisar."""
+    puestas = [il['t'] for il in ilus if il.get('t') is not None]
+    sueltas = [il for il in ilus if il.get('t') is None]
+    if not sueltas:
+        return ilus
+    inicios = sorted(s['inicio'] for s in segs if not dentro_de(s['inicio'], prohibidos)) or [0.0]
+    lo, hi = min(30.0, fin * 0.1), max(fin - 30.0, fin * 0.9)
+    n = len(sueltas)
+    # con pocos archivos para la cadencia se reparten en todo el video (no se amontonan al principio); con mas
+    # archivos que huecos, los que no caben quedan sin ubicar para que la persona decida
+    paso = (hi - lo) / n
+    if cada_s:
+        paso = max(float(cada_s), paso)
+    ideales = [t for t in (lo + paso * (k + 0.5) for k in range(n)) if lo <= t <= hi]
+    for il in sueltas:
+        elegido = None
+        for k, ideal in enumerate(ideales):
+            # el comienzo de frase mas cercano al ideal (hasta medio paso) que no quede encima de otra ilustracion
+            cands = sorted((t for t in inicios if abs(t - ideal) <= paso / 2 and lo <= t <= hi), key=lambda t: abs(t - ideal))
+            elegido = next((t for t in cands if all(abs(t - p) >= separacion for p in puestas)), None)
+            if elegido is not None:
+                ideales = ideales[k + 1:]
+                break
+        if elegido is None:
+            continue
+        puestas.append(elegido)
+        il['t'] = round(elegido, 2)
+        if str(il.get('porque') or '').startswith('Sin ubicar'):
+            il['porque'] = ''
+        il['revisar'] = 'Ubicada sola, por ritmo: revisa que el momento le quede bien.'
+    return ilus
+
+
+def capitulos_visibles(ctx, g):
+    """Los capitulos que se muestran (indice del escenario) y se publican. Con la opcion capitulos en falso, ninguno."""
+    if ctx.eleccion('capitulos', True) is False:
+        return []
+    return g.get('capitulos', [])
 
 
 def _norm(s):

@@ -19,6 +19,10 @@ type Capitulo = { inicio: number; titulo: string }
 type Corte = { inicio: number; fin: number; motivo: string; tipo: string; aplicar?: boolean }
 type Sensible = { inicio: number; fin: number; motivo: string }
 type Fija = { tipo: "rotulo" | "barra" | "popup"; salida: number; persona?: string; cta?: string; omitir?: boolean }
+/** Un archivo de la carpeta de apoyo (o una foto suelta). Sin `t`, todavia no tiene momento. */
+type Ilustracion = { archivo: string; t: number | null; modo?: string; porque?: string; revisar?: string; omitir?: boolean }
+/** La frase que abre el video antes de la intro. Tiempos de la grabacion, como el resto del guion. */
+type Gancho = { inicio: number; fin: number; por_que?: string; texto?: string; revisar?: string; omitir?: boolean }
 type Guion = {
   capitulos: Capitulo[]
   preguntas: Pregunta[]
@@ -26,12 +30,16 @@ type Guion = {
   cortes: Corte[]
   sensibles: Sensible[]
   fijas: Fija[]
+  ilustraciones: Ilustracion[]
+  gancho?: Gancho
+  duracion_estimada?: number
+  duracion_objetivo?: number
   youtube?: { titulo: string; descripcion: string; etiquetas?: string[] }
   titulo?: string
   [k: string]: unknown
 }
 
-type Pista = "capitulos" | "preguntas" | "citas" | "fijas" | "cortes" | "sensibles"
+type Pista = "capitulos" | "preguntas" | "citas" | "fijas" | "ilustraciones" | "cortes" | "sensibles"
 type Elegido = { pista: Pista; i: number } | null
 
 const PISTAS: { valor: Pista; nombre: string; color: string }[] = [
@@ -39,13 +47,25 @@ const PISTAS: { valor: Pista; nombre: string; color: string }[] = [
   { valor: "preguntas", nombre: "Preguntas", color: "bg-info" },
   { valor: "citas", nombre: "Citas", color: "bg-success" },
   { valor: "fijas", nombre: "Rótulos, barras y pop-ups", color: "bg-brand" },
+  { valor: "ilustraciones", nombre: "Ilustraciones", color: "bg-foreground/40" },
   { valor: "cortes", nombre: "Cortes", color: "bg-destructive" },
   { valor: "sensibles", nombre: "Para mirar", color: "bg-warning" },
 ]
 
-const inicioDe = (pista: Pista, x: Record<string, unknown>): number => Number(pista === "citas" ? x.t : pista === "fijas" ? x.salida : x.inicio) || 0
+const inicioDe = (pista: Pista, x: Record<string, unknown>): number =>
+  Number(pista === "citas" || pista === "ilustraciones" ? x.t : pista === "fijas" ? x.salida : x.inicio) || 0
 const finDe = (pista: Pista, x: Record<string, unknown>): number =>
-  pista === "citas" ? Number(x.t) + 7 : pista === "fijas" ? Number(x.salida) + (x.tipo === "barra" ? 12 : 5) : pista === "capitulos" ? Number(x.inicio) + 4 : Number(x.fin)
+  pista === "citas"
+    ? Number(x.t) + 7
+    : pista === "ilustraciones"
+      ? Number(x.t) + (x.modo === "recorrido" ? 16 : 6)
+      : pista === "fijas"
+        ? Number(x.salida) + (x.tipo === "barra" ? 12 : 5)
+        : pista === "capitulos"
+          ? Number(x.inicio) + 4
+          : Number(x.fin)
+/** Las ilustraciones sin momento no van en la linea de tiempo: se listan aparte. */
+const ubicado = (pista: Pista, x: Record<string, unknown>) => pista !== "ilustraciones" || typeof x.t === "number"
 
 /** Lo que conviene mirar antes de aprobar: choques y citas que no aparecen en la transcripcion. */
 export function choques(g: Guion): string[] {
@@ -60,6 +80,10 @@ export function choques(g: Guion): string[] {
   for (const c of g.citas) if (!c.omitir && c.revisar) out.push(`Cita en ${mmss(c.t)}: ${c.revisar}`)
   for (const c of g.citas) if (!c.omitir && c.texto.length > 66) out.push(`Cita en ${mmss(c.t)}: tiene ${c.texto.length} caracteres (máximo 66).`)
   for (const q of g.preguntas) if (!q.omitir && q.texto.length > 60) out.push(`Pregunta en ${mmss(q.inicio)}: tiene ${q.texto.length} caracteres (máximo 60).`)
+  const sueltas = g.ilustraciones.filter((il) => !il.omitir && typeof il.t !== "number").length
+  if (sueltas) out.push(sueltas === 1 ? "Una ilustración no tiene momento: no entra en el video." : `${sueltas} ilustraciones no tienen momento: no entran en el video.`)
+  if (g.gancho && !g.gancho.omitir && g.gancho.fin - g.gancho.inicio > 20) out.push("El gancho dura más de 20 s: acórtalo.")
+  if (g.gancho && !g.gancho.omitir && g.gancho.revisar) out.push(`Gancho: ${g.gancho.revisar}`)
   return out
 }
 
@@ -98,6 +122,7 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
       preguntas: { inicio: t, fin: t + 120, encabezado: "En esta sesión", texto: "" },
       citas: { t, quien: "", texto: "", original: "" },
       fijas: { tipo: "popup", salida: t },
+      ilustraciones: { archivo: "", t },
       cortes: { inicio: t, fin: t + 10, motivo: "", tipo: "nota_editorial", aplicar: true },
       sensibles: { inicio: t, fin: t + 10, motivo: "" },
     }
@@ -144,6 +169,13 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
             </Label>
             <Textarea id="yt-desc" rows={4} value={g.youtube?.descripcion ?? ""} onChange={(e) => setG((x) => ({ ...x, youtube: { ...(x.youtube ?? { titulo: "" }), descripcion: e.target.value } }))} />
           </div>
+          {g.duracion_estimada ? (
+            <p className="text-muted-foreground text-xs tabular-nums">
+              Duración estimada {mmss(g.duracion_estimada)}
+              {g.duracion_objetivo ? ` · objetivo ${mmss(g.duracion_objetivo)}` : ""}
+            </p>
+          ) : null}
+          {g.gancho ? <TarjetaGancho gancho={g.gancho} ir={ir} cambiar={(c) => setG((x) => ({ ...x, gancho: { ...(x.gancho as Gancho), ...c } }))} /> : null}
           {avisos.length ? (
             <div className="bg-warning-soft flex flex-col gap-1 rounded-xl p-3 text-sm" role="status">
               <span className="flex items-center gap-1.5 font-medium">
@@ -174,12 +206,15 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
           <div key={pista.valor} className="flex items-center gap-2">
             <div className="flex w-38 shrink-0 items-center justify-between gap-1">
               <span className="truncate text-xs">{pista.nombre}</span>
-              <Button size="icon" variant="ghost" className="size-6" aria-label={`Agregar en ${pista.nombre} en ${mmss(ahora)}`} onClick={() => agregar(pista.valor)}>
-                <PlusIcon className="size-3.5" />
-              </Button>
+              {pista.valor !== "ilustraciones" ? (
+                <Button size="icon" variant="ghost" className="size-6" aria-label={`Agregar en ${pista.nombre} en ${mmss(ahora)}`} onClick={() => agregar(pista.valor)}>
+                  <PlusIcon className="size-3.5" />
+                </Button>
+              ) : null}
             </div>
             <div className="bg-muted/60 relative h-7 flex-1 overflow-hidden rounded">
               {(g[pista.valor] as Record<string, unknown>[]).map((x, i) => {
+                if (!ubicado(pista.valor, x)) return null
                 const a = inicioDe(pista.valor, x)
                 const b = Math.max(finDe(pista.valor, x), a + 1)
                 const apagado = x.omitir === true || (pista.valor === "cortes" && x.aplicar === false)
@@ -187,7 +222,7 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
                   <button
                     key={i}
                     type="button"
-                    title={`${mmss(a)} · ${String(x.texto ?? x.titulo ?? x.motivo ?? x.persona ?? x.cta ?? x.tipo ?? "")}`}
+                    title={`${mmss(a)} · ${String(x.texto ?? x.titulo ?? x.motivo ?? x.persona ?? x.cta ?? x.archivo ?? x.tipo ?? "")}`}
                     aria-label={`${pista.nombre} en ${mmss(a)}`}
                     onClick={() => {
                       ir(a)
@@ -203,9 +238,27 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
         ))}
       </div>
 
+      {/* Ilustraciones sin momento: no estan en la linea de tiempo. */}
+      {g.ilustraciones.some((il) => typeof il.t !== "number") ? (
+        <div className="flex flex-col gap-1.5 rounded-xl border p-3">
+          <span className="text-xs font-medium">Ilustraciones sin momento</span>
+          <div className="flex flex-wrap gap-2">
+            {g.ilustraciones.map((il, i) =>
+              typeof il.t === "number" ? null : (
+                <Button key={i} size="sm" variant="outline" onClick={() => setElegido({ pista: "ilustraciones", i })}>
+                  {il.archivo}
+                </Button>
+              ),
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {/* Telefono: lista por minuto. */}
       <ul className="flex flex-col divide-y rounded-xl border md:hidden">
-        {PISTAS.flatMap((pista) => (g[pista.valor] as Record<string, unknown>[]).map((x, i) => ({ pista, x, i, a: inicioDe(pista.valor, x) })))
+        {PISTAS.flatMap((pista) =>
+          (g[pista.valor] as Record<string, unknown>[]).map((x, i) => ({ pista, x, i, a: inicioDe(pista.valor, x) })).filter(({ x }) => ubicado(pista.valor, x)),
+        )
           .sort((m, n) => m.a - n.a)
           .map(({ pista, x, i, a }) => (
             <li key={`${pista.valor}-${i}`}>
@@ -214,7 +267,7 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
                 <span className={`mt-1.5 size-2 shrink-0 rounded-full ${pista.color}`} aria-hidden />
                 <span className={`min-w-0 text-sm ${x.omitir ? "line-through opacity-60" : ""}`}>
                   <span className="text-muted-foreground block text-xs">{pista.nombre}</span>
-                  <span className="line-clamp-2">{String(x.texto || x.titulo || x.motivo || x.persona || x.cta || x.tipo || "")}</span>
+                  <span className="line-clamp-2">{String(x.texto || x.titulo || x.motivo || x.persona || x.cta || x.archivo || x.tipo || "")}</span>
                 </span>
               </button>
             </li>
@@ -253,7 +306,43 @@ function normalizar(g: Partial<Guion> | undefined): Guion {
     cortes: g?.cortes ?? [],
     sensibles: g?.sensibles ?? [],
     fijas: g?.fijas ?? [],
+    ilustraciones: g?.ilustraciones ?? [],
   }
+}
+
+/** El gancho: la frase que abre el video antes de la intro. Se puede mover, acortar o quitar. */
+function TarjetaGancho({ gancho, ir, cambiar }: { gancho: Gancho; ir: (t: number) => void; cambiar: (c: Partial<Gancho>) => void }) {
+  const activo = gancho.omitir !== true
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border p-4">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground text-xs">Gancho al abrir</span>
+        <Button size="sm" variant="ghost" onClick={() => ir(gancho.inicio)}>
+          Ver {mmss(gancho.inicio)}
+        </Button>
+      </div>
+      {gancho.texto ? <p className={`text-sm ${activo ? "" : "line-through opacity-60"}`}>“{gancho.texto}”</p> : null}
+      {gancho.por_que ? <p className="text-muted-foreground text-xs">{gancho.por_que}</p> : null}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="gancho-inicio" className="text-xs">
+            Empieza en (segundos)
+          </Label>
+          <Input id="gancho-inicio" type="number" step="0.5" min={0} value={gancho.inicio} onChange={(e) => cambiar({ inicio: Number(e.target.value) })} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="gancho-fin" className="text-xs">
+            Termina en (segundos)
+          </Label>
+          <Input id="gancho-fin" type="number" step="0.5" min={0} value={gancho.fin} onChange={(e) => cambiar({ fin: Number(e.target.value) })} />
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch id="gancho-activo" checked={activo} onCheckedChange={(v) => cambiar({ omitir: !v })} />
+        <Label htmlFor="gancho-activo">Abrir el video con esta frase, antes de la intro</Label>
+      </div>
+    </div>
+  )
 }
 
 /** El panel lateral: los campos del elemento elegido. */
@@ -322,6 +411,14 @@ function Editor({ g, elegido, alCerrar, editar }: { g: Guion; elegido: Elegido; 
                   {x.tipo === "rotulo" ? `Rótulo de ${String(x.persona ?? "")}` : x.tipo === "barra" ? `Barra con el CTA ${String(x.cta ?? "")}` : "Pop-up para seguir la cuenta"}
                 </p>
                 {num("salida", "Entra en el video editado")}
+              </>
+            ) : null}
+            {elegido.pista === "ilustraciones" ? (
+              <>
+                <p className="text-sm">{String(x.archivo ?? "")}</p>
+                {num("t", "Se ve en")}
+                {x.porque ? <p className="text-muted-foreground text-xs">{String(x.porque)}</p> : null}
+                {x.revisar ? <p className="bg-warning-soft rounded-md p-2 text-xs">{String(x.revisar)}</p> : null}
               </>
             ) : null}
             {elegido.pista === "cortes" ? (

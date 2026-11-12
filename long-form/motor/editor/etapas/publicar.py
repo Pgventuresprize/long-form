@@ -10,7 +10,7 @@ import os
 import time
 from pathlib import Path
 
-from ..contexto import Mapa
+from ..contexto import Mapa, desfase
 
 API = 'https://www.googleapis.com'
 
@@ -30,9 +30,12 @@ def token(ctx):
 
 
 def capitulos(ctx, g):
-    """Capitulos en tiempo del video final. YouTube exige: el primero en 0:00, al menos 3, de 10 s o mas."""
+    """Capitulos en tiempo del video final (despues del gancho y la intro). YouTube exige: el primero en 0:00, al
+    menos 3, de 10 s o mas. Con la opcion capitulos en falso, ninguno."""
+    if hasattr(ctx, 'eleccion') and ctx.eleccion('capitulos', True) is False:
+        return ''
     gr = ctx.estado['graficos']
-    mapa = Mapa([tuple(k) for k in ctx.estado['keep']], ctx.FPS, gr['intro_s'])
+    mapa = Mapa([tuple(k) for k in ctx.estado['keep']], ctx.FPS, desfase(gr))
     caps = [(0.0 if i == 0 else mapa.salida(c['inicio']), c['titulo']) for i, c in enumerate(g.get('capitulos', []))]
     limpio = []
     for t, titulo in caps:

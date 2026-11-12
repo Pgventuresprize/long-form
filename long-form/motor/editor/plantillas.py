@@ -58,11 +58,11 @@ def fuentes_css(m):
     return f"@font-face{{font-family:'{familia}';src:url({m.url(rel)}) format('{fmt}');font-weight:700}}"
 
 
-def variables(m, fondo='transparent'):
+def variables(m, fondo='transparent', ancho=ANCHO, alto=ALTO):
     c = m.c
     grad = m.degradado if len(m.degradado) >= 2 else [c['acento'], c['acento_texto']]
     return {
-        'fuentes': fuentes_css(m), 'ancho': ANCHO, 'alto': ALTO, 'fondo': fondo,
+        'fuentes': fuentes_css(m), 'ancho': ancho, 'alto': alto, 'fondo': fondo,
         'familia': m.familia.replace("'", '').replace('"', '').replace('\\', ''),
         'tinta': c['tinta'], 'papel': c.get('papel', '#ffffff'), 'acento': c['acento'], 'acento_texto': c['acento_texto'],
         'apagado': c['apagado'], 'kick': c.get('kick', '#c9bfb6'), 'borde': c.get('borde', '#a39486'),
@@ -117,9 +117,9 @@ def logo_html(m):
     return f'<img class="logo" src="{escapar(m.url(rel))}" alt="">' if rel else ''
 
 
-def css_de(m, tipo):
+def css_de(m, tipo, ancho=ANCHO, alto=ALTO):
     tarjeta = tipo.startswith('tarjeta')
-    v = variables(m, m.c['acento'] if tarjeta else 'transparent')
+    v = variables(m, m.c['acento'] if tarjeta else 'transparent', ancho, alto)
     return rellenar_css(leer('base.css'), v) + rellenar_css(leer('tarjetas.css' if tarjeta else 'piezas.css'), v)
 
 
@@ -127,6 +127,8 @@ def cuerpo(m, tipo, p):
     return rellenar(leer(f'{tipo}.html'), {k: _num(v) for k, v in datos_de(m, tipo, p).items()})
 
 
-def pagina(m, tipo, p, disposicion='pantalla'):
-    return (f'<!doctype html><html lang="es"><head><meta charset="utf-8"><style>{css_de(m, tipo)}</style></head>'
+def pagina(m, tipo, p, disposicion='pantalla', ancho=ANCHO, alto=ALTO):
+    """La pagina de una pieza. ancho y alto: el lienzo (1920x1080; las tarjetas de un video 9:16 o 1:1 van en el
+    suyo, y como el titulo se parte en lineas el mismo HTML sirve)."""
+    return (f'<!doctype html><html lang="es"><head><meta charset="utf-8"><style>{css_de(m, tipo, ancho, alto)}</style></head>'
             f'<body class="d-{disposicion}">{cuerpo(m, tipo, p)}</body></html>')
