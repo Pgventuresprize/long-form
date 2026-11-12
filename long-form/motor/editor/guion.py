@@ -120,14 +120,21 @@ def nombre_archivo(a):
     return a.get('nombre') or a['ruta'].rsplit('/', 1)[-1]
 
 
-def esquema(gancho=False, duracion=False):
-    """ESQUEMA tal cual, o con el gancho y el tipo de corte 'duracion' cuando el video los pide."""
+def esquema(gancho=False, duracion=None):
+    """ESQUEMA tal cual, o con el gancho y el tipo de corte 'duracion' cuando el video los pide. En modo
+    'seleccion' (lo pedido es mucho mas corto que el material) va ademas la lista de tramos que se quedan."""
     if not gancho and not duracion:
         return ESQUEMA
     import copy
     e = copy.deepcopy(ESQUEMA)
     if duracion:
         e['properties']['cortes']['items']['properties']['tipo']['enum'].append('duracion')
+    if isinstance(duracion, dict) and duracion.get('modo') == 'seleccion':
+        e['required'] = e['required'] + ['seleccion']
+        e['properties']['seleccion'] = {'type': 'array', 'items': {'type': 'object', 'required': ['inicio', 'fin', 'por_que'], 'properties': {
+            'inicio': {'type': 'number', 'description': 'segundo en que empieza el tramo (inicio de una frase)'},
+            'fin': {'type': 'number', 'description': 'segundo en que termina (fin de una frase)'},
+            'por_que': {'type': 'string', 'description': 'que aporta este tramo, en una frase'}}}}
     if gancho:
         e['properties']['gancho'] = {'type': 'object', 'required': ['inicio', 'fin', 'por_que'], 'properties': {
             'inicio': {'type': 'number', 'description': 'segundo en que empieza la frase'},
@@ -145,12 +152,22 @@ def pedidos_extra(gancho=False, duracion=None, broll_min=None, n_ilustraciones=0
                    '20 s, una idea completa que se entienda sola y despierte curiosidad, que empiece y termine en frase '
                    'completa. Que no esté en un tramo que propones cortar ni en uno sensible.')
     if duracion:
-        est, obj = duracion['estimada_s'], duracion['objetivo_s']
-        out.append(f'DURACIÓN: el video editado dura unos {_coma(est / 60)} min y quien pidió la edición quiere unos '
-                   f'{_coma(obj / 60)} min. Propón además cortes de tipo "duracion" en los tramos que menos aportan '
-                   f'(repeticiones, divagaciones, ejemplos de más) hasta sumar unos {_coma(max(est - obj, 0) / 60)} min. '
-                   'Cada corte empieza y termina en frase completa, nunca a mitad de una idea; en "motivo" di qué se '
-                   'pierde. No cortes donde pones una cita, una pregunta o el gancho.')
+        est, obj, mini = duracion['estimada_s'], duracion['objetivo_s'], duracion.get('minimo_s')
+        pide = f'entre {_coma(mini / 60)} y {_coma(obj / 60)} min' if mini else f'unos {_coma(obj / 60)} min'
+        if duracion.get('modo') == 'seleccion':
+            # mucho mas corto que el material: se elige lo que queda, no se recortan pedazos
+            out.append(f'DURACIÓN: el video editado dura unos {_coma(est / 60)} min y quien pidió la edición quiere un '
+                       f'video de {pide}: mucho más corto. En "seleccion" elige los tramos que se quedan, en orden, que '
+                       f'juntos sumen {pide} (apunta al medio del rango) y cuenten algo completo: el mejor arranque, las '
+                       'ideas centrales y un cierre. Cada tramo empieza y termina en frase completa, nunca a mitad de una '
+                       'idea. Todo lo que no elijas se corta. Las citas, preguntas y el gancho van dentro de lo elegido.')
+        else:
+            out.append(f'DURACIÓN: el video editado dura unos {_coma(est / 60)} min y quien pidió la edición quiere '
+                       f'{pide}. Propón además cortes de tipo "duracion" en los tramos que menos aportan '
+                       f'(repeticiones, divagaciones, ejemplos de más) hasta sumar unos {_coma(max(est - obj, 0) / 60)} min'
+                       + (f', sin bajar de {_coma(mini / 60)} min' if mini else '') + '. '
+                       'Cada corte empieza y termina en frase completa, nunca a mitad de una idea; en "motivo" di qué se '
+                       'pierde. No cortes donde pones una cita, una pregunta o el gancho.')
     if broll_min and n_ilustraciones:
         out.append(f'RITMO DE ILUSTRACIONES: reparte los archivos ilustrativos a lo largo del video, más o menos uno cada '
                    f'{_coma(broll_min)} min, cada uno donde se habla de lo que muestra (si no se nota de qué trata, donde '
@@ -167,7 +184,7 @@ def proponer(ctx, segs, dur, personas, gancho=False, duracion=None, broll_min=No
               f"Archivos ilustrativos disponibles: {', '.join(ilus) if ilus else 'ninguno'}\n"
               + ''.join(f'{x}\n' for x in extra) +
               f"\nTranscripción:\n{ia.texto_transcripcion(segs)}")
-    r = ia.pedir_json(sistema(ctx), cuerpo, esquema(gancho, bool(duracion)), 'guion', max_tokens=16000)
+    r = ia.pedir_json(sistema(ctx), cuerpo, esquema(gancho, duracion), 'guion', max_tokens=16000)
     return r
 
 
@@ -236,6 +253,36 @@ def ajustar_cortes_duracion(cortes, segs):
             continue
         out.append({**c, 'inicio': round(dentro[0]['inicio'], 2), 'fin': round(dentro[-1]['fin'], 2)})
     return out
+
+
+def seleccion_a_cortes(seleccion, fin, minimo_corte=1.0):
+    """Los tramos que Claude eligio para quedarse, a cortes por duracion: todo lo que queda entre ellos (y antes del
+    primero y despues del ultimo). Los tramos se ordenan y se juntan si se pisan. Huecos de menos de `minimo_corte`
+    s no se cortan. Sin seleccion valida, lista vacia (y el video no se recorta por este camino)."""
+    tramos = []
+    for t in seleccion or []:
+        try:
+            a, b = max(0.0, float(t['inicio'])), min(float(fin), float(t['fin']))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if b > a:
+            tramos.append([a, b])
+    if not tramos:
+        return []
+    tramos.sort()
+    juntos = [tramos[0]]
+    for a, b in tramos[1:]:
+        if a <= juntos[-1][1]:
+            juntos[-1][1] = max(juntos[-1][1], b)
+        else:
+            juntos.append([a, b])
+    cortes, desde = [], 0.0
+    for a, b in juntos + [[float(fin), float(fin)]]:
+        if a - desde >= minimo_corte:
+            cortes.append({'inicio': round(desde, 2), 'fin': round(a, 2), 'tipo': 'duracion',
+                           'motivo': 'Fuera de lo elegido para la duración pedida'})
+        desde = max(desde, b)
+    return cortes
 
 
 def dentro_de(t, tramos):

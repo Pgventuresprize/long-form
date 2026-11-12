@@ -1,20 +1,37 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { agregarIndicacion, conUso, encajaEnTipo, mover, opcionesDelSpec, opcionesValidas, OPCIONES_BASE, ordenDeFuentes, tipoDeApoyo, tituloDeArchivo, usoLibre } from "../src/engine/long-form/nuevo"
+import { agregarIndicacion, conUso, DURACIONES, NOMBRE_DURACION, RANGO_DURACION, encajaEnTipo, mover, opcionesDelSpec, opcionesValidas, OPCIONES_BASE, ordenDeFuentes, tipoDeApoyo, tituloDeArchivo, usoLibre } from "../src/engine/long-form/nuevo"
 
 test("nuevo: spec.opciones lleva formato y capitulos siempre; lo demas solo si se eligio", () => {
   assert.deepEqual(opcionesDelSpec(OPCIONES_BASE), { formato: "16:9", capitulos: true })
-  assert.deepEqual(opcionesDelSpec({ formato: "9:16", duracion: "15-20", subtitulos: "no", gancho: "si", capitulos: false }), {
+  assert.deepEqual(opcionesDelSpec({ formato: "9:16", duracion: "15-30", subtitulos: "no", gancho: "si", capitulos: false }), {
     formato: "9:16",
     capitulos: false,
-    duracion_objetivo_min: 17.5,
+    duracion_rango_min: [15, 30],
+    duracion_objetivo_min: 30,
     subtitulos: false,
     gancho: true,
   })
-  assert.equal(opcionesDelSpec({ ...OPCIONES_BASE, duracion: "8-12" }).duracion_objetivo_min, 10)
-  assert.equal(opcionesDelSpec({ ...OPCIONES_BASE, duracion: "30+" }).duracion_objetivo_min, 35)
+  assert.deepEqual(opcionesDelSpec({ ...OPCIONES_BASE, duracion: "0.5-1" }).duracion_rango_min, [0.5, 1])
+  assert.equal(opcionesDelSpec({ ...OPCIONES_BASE, duracion: "60-120" }).duracion_objetivo_min, 120)
+  assert.equal("duracion_rango_min" in opcionesDelSpec(OPCIONES_BASE), false)
   assert.equal("subtitulos" in opcionesDelSpec({ ...OPCIONES_BASE, subtitulos: "auto" }), false)
+})
+
+test("nuevo: los rangos de duracion crecen en escala logaritmica, sin huecos", () => {
+  const rangos = DURACIONES.filter((d) => d !== "auto").map((d) => RANGO_DURACION[d as Exclude<typeof d, "auto">])
+  assert.deepEqual(rangos[0], [0.5, 1])
+  for (let i = 1; i < rangos.length; i++) {
+    // cada rango empieza donde termina el anterior y es entre 1,5 y 2 veces mas largo
+    assert.equal(rangos[i][0], rangos[i - 1][1])
+    const r = rangos[i][1] / rangos[i][0]
+    assert.ok(r >= 1.5 && r <= 2, `${rangos[i]}`)
+  }
+  assert.equal(NOMBRE_DURACION["0.5-1"], "30 s – 1 min")
+  assert.equal(NOMBRE_DURACION["8-15"], "8–15 min")
+  assert.equal(NOMBRE_DURACION["60-120"], "1–2 h")
+  assert.equal(NOMBRE_DURACION.auto, "Lo que dé el material")
 })
 
 test("nuevo: las opciones del navegador se revisan", () => {

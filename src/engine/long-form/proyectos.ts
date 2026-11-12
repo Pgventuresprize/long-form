@@ -10,7 +10,7 @@ export type SpecProyecto = {
   vocabulario: string[]
   ctas: string[]
   notas_editoriales: string
-  opciones: Record<string, number | boolean | string>
+  opciones: Record<string, number | boolean | string | number[]>
   esfuerzo: Nivel
 }
 

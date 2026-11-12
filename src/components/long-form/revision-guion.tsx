@@ -34,6 +34,8 @@ type Guion = {
   gancho?: Gancho
   duracion_estimada?: number
   duracion_objetivo?: number
+  /** [minimo, maximo] en segundos, si la persona eligio un rango (plan.py). */
+  duracion_rango?: [number, number]
   youtube?: { titulo: string; descripcion: string; etiquetas?: string[] }
   titulo?: string
   [k: string]: unknown
@@ -172,7 +174,7 @@ export function RevisionGuion({ p, urls, alAprobar }: { p: Proyecto; urls: Recor
           {g.duracion_estimada ? (
             <p className="text-muted-foreground text-xs tabular-nums">
               Duración estimada {mmss(g.duracion_estimada)}
-              {g.duracion_objetivo ? ` · objetivo ${mmss(g.duracion_objetivo)}` : ""}
+              {g.duracion_rango ? ` · pediste entre ${mmss(g.duracion_rango[0])} y ${mmss(g.duracion_rango[1])}` : g.duracion_objetivo ? ` · objetivo ${mmss(g.duracion_objetivo)}` : ""}
             </p>
           ) : null}
           {g.gancho ? <TarjetaGancho gancho={g.gancho} ir={ir} cambiar={(c) => setG((x) => ({ ...x, gancho: { ...(x.gancho as Gancho), ...c } }))} /> : null}
