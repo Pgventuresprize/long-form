@@ -6,7 +6,8 @@ import { NIVELES, type Nivel } from "@/engine/long-form/estilo"
 import { estiloDe } from "@/engine/long-form/estilo-datos"
 import { avisar, avisosDe, BUCKET, marcarLeidos, proyectoDe, urlsFirmadas, type Aviso, type Proyecto } from "@/engine/long-form/datos"
 import { encolarEtapa } from "@/engine/long-form/motor"
-import { specDesdeEstilo } from "@/engine/long-form/proyectos"
+import { formatoPorNombre, MENSAJE_FORMATO } from "@/engine/long-form/audio"
+import { specDesdeEstilo, type SpecProyecto } from "@/engine/long-form/proyectos"
 import { TIPOS_GRABACION } from "@/engine/long-form/tipos"
 import { supabaseAdmin } from "@/engine/supabase-admin"
 import { cuentaActual } from "@/lib/accounts"
@@ -29,7 +30,20 @@ const MAX_ARCHIVOS = 12
 // Es la misma lista de long-form/motor/editor/etapas/ingesta.py (CLAVES).
 const CLAVES_FUENTE = "ABCDEFGHIJKLMNOPQRTUVWYZ"
 
-function tipoDe(nombre: string): "fuente" | "audio" | "pdf" | "foto" | null {
+/** Para que suena una musica del video: al empezar, bajo toda la conversacion o al cerrar. */
+export type UsoMusica = "intro" | "fondo" | "cierre"
+const USOS_MUSICA: UsoMusica[] = ["intro", "fondo", "cierre"]
+
+type Entrada = { nombre: string; bytes: number; uso?: UsoMusica }
+
+/**
+ * Que es cada archivo. Una musica viene marcada con su `uso` (la persona dijo para que es): entra como
+ * `musica` aunque sea un MP3 o un MP4, y de un video se usa solo el audio. Sin marca, manda la extension
+ * (un MP3 suelto es el "audio aparte" que reemplaza al de camara).
+ */
+function tipoDe(a: Entrada): "fuente" | "audio" | "pdf" | "foto" | "musica" | null {
+  if (a.uso) return USOS_MUSICA.includes(a.uso) && formatoPorNombre(a.nombre, "") ? "musica" : null
+  const nombre = a.nombre
   if (VIDEO.test(nombre)) return "fuente"
   if (AUDIO.test(nombre)) return "audio"
   if (OTROS.pdf.test(nombre)) return "pdf"
@@ -58,7 +72,9 @@ export async function crearProyecto(datos: {
   esfuerzo: Nivel
   notas: string
   ctaDefecto: string | null
-  archivos: { nombre: string; bytes: number }[]
+  archivos: Entrada[]
+  /** Musica elegida de la biblioteca de la marca para este video (ids de `lf_biblioteca`), por uso. */
+  musicaBiblioteca?: Partial<Record<UsoMusica, string>>
 }): Promise<Hecho<{ id: string; subidas: Subida[]; destino: DestinoSubida }>> {
   try {
     const accountId = await idDeCuentaCon("long_form")
@@ -68,16 +84,28 @@ export async function crearProyecto(datos: {
     if (!NIVELES.includes(datos.esfuerzo)) return { ok: false, error: "Elige un nivel." }
     if (!datos.archivos.length) return { ok: false, error: "Agrega al menos un video." }
     if (datos.archivos.length > MAX_ARCHIVOS) return { ok: false, error: `Como mucho ${MAX_ARCHIVOS} archivos por video.` }
-    const tipos = datos.archivos.map((a) => tipoDe(a.nombre))
+    const tipos = datos.archivos.map((a) => tipoDe(a))
     const malo = datos.archivos.find((_, i) => !tipos[i])
-    if (malo) return { ok: false, error: `${malo.nombre} no es un video, un audio, un PDF ni una foto.` }
+    if (malo) return { ok: false, error: malo.uso ? `${malo.nombre}: ${MENSAJE_FORMATO}` : `${malo.nombre} no es un video, un audio, un PDF ni una foto.` }
     if (!tipos.includes("fuente")) return { ok: false, error: "Agrega al menos un video." }
+    const repetido = USOS_MUSICA.find((u) => datos.archivos.filter((a) => a.uso === u).length + (datos.musicaBiblioteca?.[u] ? 1 : 0) > 1)
+    if (repetido) return { ok: false, error: `Elige una sola música de ${repetido === "intro" ? "inicio" : repetido}.` }
 
     const estilo = await estiloDe(accountId)
     if (!estilo?.listo) return { ok: false, error: "Primero confirma el estilo de long form en Marca." }
-    const spec = specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name })
+    const spec: SpecProyecto & Record<string, unknown> = specDesdeEstilo(estilo.config, { notas: datos.notas, ctaDefecto: datos.ctaDefecto, esfuerzo: datos.esfuerzo, marca: cuenta.name })
 
     const db = supabaseAdmin()
+    // La musica elegida de la biblioteca: el motor la baja de Storage por su ruta (render.py, `musica_<uso>`).
+    const elegidas = Object.entries(datos.musicaBiblioteca ?? {}).filter(([u, aid]) => USOS_MUSICA.includes(u as UsoMusica) && aid)
+    if (elegidas.length) {
+      const { data: filasBib } = await db.from("lf_biblioteca").select("id, ruta").eq("account_id", accountId).eq("tipo", "musica").in("id", elegidas.map(([, aid]) => aid!))
+      for (const [uso, aid] of elegidas) {
+        const fila = ((filasBib ?? []) as { id: string; ruta: string }[]).find((f) => f.id === aid)
+        if (!fila) return { ok: false, error: "Una de las músicas elegidas ya no está en la biblioteca." }
+        spec[`musica_${uso}`] = fila.ruta
+      }
+    }
     // El tipo de grabacion lo decide la etapa clasificar del motor: hasta entonces queda nulo.
     const { data: p, error } = await db
       .from("lf_proyectos")
@@ -90,7 +118,8 @@ export async function crearProyecto(datos: {
     let n = 0
     const filas = datos.archivos.map((a, i) => {
       const tipo = tipos[i]!
-      const rol = tipo === "fuente" ? CLAVES_FUENTE[n++] : null
+      // El rol: la letra de cada video, o para que es cada musica (render.py la busca por ese rol).
+      const rol = tipo === "fuente" ? CLAVES_FUENTE[n++] : tipo === "musica" ? a.uso! : null
       return { account_id: accountId, proyecto_id: id, tipo, nombre: a.nombre.slice(0, 200), ruta: `${accountId}/${id}/entrada/${i + 1}-${limpio(a.nombre)}`, bytes: a.bytes, rol, subida: "pendiente" }
     })
     const { data: insertados, error: e2 } = await db.from("lf_archivos").insert(filas).select("id, nombre, ruta")

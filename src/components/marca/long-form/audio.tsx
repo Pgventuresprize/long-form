@@ -5,14 +5,15 @@ import { PauseIcon, PlayIcon, UploadIcon } from "lucide-react"
 
 import { prepararSubidaAudio, registrarAudio, urlDeAudio } from "@/app/marca/long-form-actions"
 import { Button } from "@/components/ui/button"
-import { ACEPTA_AUDIO, formatoPorFirma, formatoPorNombre, MAX_AUDIO_BYTES, MENSAJE_FORMATO } from "@/engine/long-form/audio"
+import { ACEPTA_AUDIO, contenedorDe, esVideo, formatoPorFirma, formatoPorNombre, maxBytesDe, MENSAJE_FORMATO, mensajeTamano, mimeDe } from "@/engine/long-form/audio"
 import type { Audio } from "@/engine/long-form/estilo-datos"
+import { idStudio, SFX_STUDIO, SFX_SUGERIDOS } from "@/engine/long-form/sfx-studio"
 
-/** La duracion la lee el navegador; el motor la vuelve a medir con ffprobe. */
-function duracionDe(archivo: File): Promise<number | null> {
+/** La duracion la lee el navegador (de un video tambien); el motor la vuelve a medir con ffprobe. */
+function duracionDe(archivo: File, video: boolean): Promise<number | null> {
   return new Promise((resolver) => {
     const url = URL.createObjectURL(archivo)
-    const a = new window.Audio()
+    const a = video ? document.createElement("video") : new window.Audio()
     a.preload = "metadata"
     a.onloadedmetadata = () => {
       URL.revokeObjectURL(url)
@@ -26,20 +27,23 @@ function duracionDe(archivo: File): Promise<number | null> {
   })
 }
 
-/** Sube un MP3 o WAV: valida en el navegador, sube directo a Storage y el servidor confirma la firma. */
+/**
+ * Sube un audio, o un video del que se usa el audio: valida en el navegador, sube directo a Storage y
+ * el servidor confirma la firma.
+ */
 export async function subirAudio(archivo: File, tipo: "musica" | "sfx", momento: string | null): Promise<{ ok: true; audio: Audio } | { ok: false; error: string }> {
   const formato = formatoPorNombre(archivo.name, archivo.type)
   if (!formato) return { ok: false, error: MENSAJE_FORMATO }
-  if (archivo.size > MAX_AUDIO_BYTES) return { ok: false, error: "El archivo no puede pasar de 50 MB." }
-  // La firma tambien en el navegador: asi un MP4 renombrado se rechaza antes de subirlo.
+  if (archivo.size > maxBytesDe(formato)) return { ok: false, error: mensajeTamano(formato) }
+  // La firma tambien en el navegador: asi un archivo renombrado se rechaza antes de subirlo.
   const cabeza = new Uint8Array(await archivo.slice(0, 16).arrayBuffer())
-  if (formatoPorFirma(cabeza) !== formato) return { ok: false, error: `${MENSAJE_FORMATO} Este archivo no lo es por dentro.` }
+  if (formatoPorFirma(cabeza) !== contenedorDe(formato)) return { ok: false, error: `${MENSAJE_FORMATO} Este archivo no lo es por dentro.` }
 
   const p = await prepararSubidaAudio({ nombre: archivo.name, mime: archivo.type, bytes: archivo.size })
   if (!p.ok) return p
-  const r = await fetch(p.url, { method: "PUT", body: archivo, headers: { "content-type": archivo.type || (formato === "mp3" ? "audio/mpeg" : "audio/wav"), "x-upsert": "false" } })
+  const r = await fetch(p.url, { method: "PUT", body: archivo, headers: { "content-type": archivo.type || mimeDe(formato), "x-upsert": "false" } })
   if (!r.ok) return { ok: false, error: `No se pudo subir (HTTP ${r.status}). Intenta otra vez.` }
-  const duracion = await duracionDe(archivo)
+  const duracion = await duracionDe(archivo, esVideo(formato))
   const g = await registrarAudio({ ruta: p.ruta, nombre: archivo.name, tipo, momento, duracion })
   if (!g.ok) return g
   return { ok: true, audio: { id: g.id, tipo, momento, nombre: archivo.name, formato, bytes: archivo.size, duracion } }
@@ -115,19 +119,32 @@ export function SelectorAudio({
           className="border-input bg-background h-8 min-w-0 flex-1 rounded-md border px-2 text-sm sm:max-w-72"
         >
           <option value="">Sin {tipo === "musica" ? "música" : "efecto"}</option>
-          {opciones.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.nombre}
-              {a.duracion ? ` · ${Math.round(a.duracion)} s` : ""}
-            </option>
-          ))}
+          {tipo === "sfx" ? (
+            <optgroup label="Biblioteca de Studio (gratis)">
+              {SFX_STUDIO.map((s) => (
+                <option key={s.slug} value={idStudio(s.slug)}>
+                  {s.nombre}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
+          {opciones.length ? (
+            <optgroup label={tipo === "musica" ? "Tu música" : "Tus sonidos"}>
+              {opciones.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.nombre}
+                  {a.duracion ? ` · ${Math.round(a.duracion)} s` : ""}
+                </option>
+              ))}
+            </optgroup>
+          ) : null}
         </select>
         <Button type="button" size="icon" variant="outline" disabled={!valor} onClick={escuchar} aria-label={sonando ? "Detener" : "Escuchar"}>
           {sonando ? <PauseIcon /> : <PlayIcon />}
         </Button>
         <Button type="button" size="sm" variant="outline" disabled={subiendo} onClick={() => entrada.current?.click()}>
           <UploadIcon />
-          {subiendo ? "Subiendo..." : "Subir MP3 o WAV"}
+          {subiendo ? "Subiendo..." : "Subir audio o video"}
         </Button>
         <input ref={entrada} type="file" accept={ACEPTA_AUDIO} className="sr-only" tabIndex={-1} aria-hidden onChange={(e) => elegir(e.target.files?.[0])} />
       </div>
@@ -138,4 +155,11 @@ export function SelectorAudio({
       ) : null}
     </div>
   )
+}
+
+/** Un efecto de Studio para cada momento, de un clic. Solo llena los momentos que estan vacios. */
+export function sfxDeStudio<T extends Record<string, string | null | undefined | number>>(actual: T): T {
+  const out: Record<string, unknown> = { ...actual }
+  for (const [momento, slug] of Object.entries(SFX_SUGERIDOS)) if (!out[momento]) out[momento] = idStudio(slug)
+  return out as T
 }

@@ -7,6 +7,7 @@ MOTOR = Path(__file__).resolve().parent.parent          # long-form/motor/
 LONG_FORM = MOTOR.parent                               # long-form/
 PLANTILLAS = LONG_FORM / 'plantillas'                  # el HTML de los graficos, compartido con Studio
 FUENTES_STUDIO = PLANTILLAS / 'fuentes'
+SFX_STUDIO = PLANTILLAS / 'sfx'                         # la biblioteca generica de efectos (generar.py)
 SUBTITULOS = MOTOR / 'subtitulos'
 
 FFMPEG = os.environ.get('FFMPEG', 'ffmpeg')

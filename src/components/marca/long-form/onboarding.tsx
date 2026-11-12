@@ -81,10 +81,10 @@ export function OnboardingEstilo({
       <div className="flex flex-col gap-4 rounded-xl border p-4">
         <div>
           <h3 className="font-medium">Música</h3>
-          <p className="text-muted-foreground text-sm">MP3 o WAV para la intro y el cierre. Puedes seguir sin ella y ponerla después.</p>
+          <p className="text-muted-foreground text-sm">Un audio o un video del que se usa el sonido. Puedes seguir sin ella y ponerla después.</p>
         </div>
         <SelectorAudio
-          etiqueta="Música de intro"
+          etiqueta="Música de inicio"
           tipo="musica"
           momento="intro"
           valor={e.musica.intro}
@@ -93,6 +93,16 @@ export function OnboardingEstilo({
           // Sin cierre propio, la misma cancion abre y cierra.
           onCambio={(id) => setE((x) => ({ ...x, musica: { ...x.musica, intro: id, cierre: x.musica.cierre ?? id } }))}
         />
+        <SelectorAudio
+          etiqueta="Música de fondo (opcional)"
+          tipo="musica"
+          momento="fondo"
+          valor={e.musica.fondo}
+          biblioteca={biblioteca}
+          onSubido={(a) => setBiblioteca((b) => [a, ...b])}
+          onCambio={(id) => setE((x) => ({ ...x, musica: { ...x.musica, fondo: id } }))}
+        />
+        <p className="text-muted-foreground text-xs">La de fondo suena bajo toda la conversación y baja sola cuando alguien habla.</p>
       </div>
 
       {error ? (

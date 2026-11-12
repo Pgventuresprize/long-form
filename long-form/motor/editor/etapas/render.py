@@ -164,6 +164,61 @@ def tarjeta_clip(ctx, png, dur, out, fo):
 
 
 # ---------------------------------------------------------------- audio
+def lufs_fondo(volumen):
+    """Volumen del fondo (0 a 1, del estilo) a sonoridad: 0,35 queda cerca de -30 LUFS, muy por debajo de la
+    voz (-16). Al maximo llega a -20: sigue siendo fondo."""
+    return -36.0 + 16.0 * max(0.0, min(1.0, volumen))
+
+
+def bucle(y, n, sr, cruce=1.0):
+    """Repite una cancion hasta n muestras, con un cruce de `cruce` s en cada vuelta para que no se note el
+    empalme. Si ya alcanza, se corta."""
+    if len(y) >= n:
+        return y[:n].copy()
+    c = min(int(cruce * sr), len(y) // 4)
+    paso = len(y) - c
+    out = np.zeros((n, y.shape[1]), np.float32)
+    r = np.linspace(0, 1, c, dtype=np.float32)[:, None] if c else None
+    pos = 0
+    while pos < n:
+        seg = y.copy()
+        if c:
+            if pos:
+                seg[:c] *= r
+            seg[-c:] *= r[::-1]
+        e = min(n, pos + len(seg))
+        out[pos:e] += seg[:e - pos]
+        pos += paso
+    return out
+
+
+def ganancia_ducking(voz, sr, baja_db=10.0, ventana=0.05, ataque=0.12, suelta=0.7, sosten=0.3):
+    """Cuanto bajar el fondo en cada muestra segun la voz (mono). Con voz baja `baja_db`; sin voz vuelve a 0 dB.
+    Baja rapido (`ataque`), sube lento (`suelta`) y aguanta `sosten` s entre palabras: asi no "bombea"."""
+    n = len(voz)
+    h = max(1, int(sr * ventana))
+    m = -(-n // h)
+    marco = np.zeros(m * h, np.float32)
+    marco[:n] = voz
+    db = 10 * np.log10((marco.reshape(m, h).astype(np.float64) ** 2).mean(axis=1) + 1e-12)
+    activos = db[db > -70]
+    if not len(activos):
+        return np.ones(n, np.float32)
+    # La voz es lo fuerte del programa: su nivel tipico menos 18 dB separa voz de respiraciones y sala.
+    hay = db > np.percentile(activos, 60) - 18
+    k = max(1, int(sosten / ventana))
+    hay = np.convolve(hay.astype(float), np.ones(2 * k + 1), 'same') > 0
+    objetivo = np.where(hay, -float(baja_db), 0.0)
+    ca, cs = np.exp(-ventana / ataque), np.exp(-ventana / suelta)
+    g = np.empty(m)
+    x = 0.0
+    for i in range(m):
+        c = ca if objetivo[i] < x else cs
+        x = c * x + (1 - c) * objetivo[i]
+        g[i] = x
+    return np.repeat(10 ** (g / 20), h)[:n].astype(np.float32)
+
+
 def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=True):
     sr = 48000
     tmp = ctx.tj('render') / 'programa_tratado.wav'
@@ -207,15 +262,36 @@ def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=Tru
             mix[s:e] += y[:e - s] * g
     m = ctx.marca
     lufs = m.cfg.get('musica', {}).get('loudness_lufs', -17)
+
+    def con_audio(ruta, nombre):
+        # De un video (MP4, MOV) se usa su audio; si no trae pista de audio, se avisa y se sigue sin ella.
+        if ruta and not ffm.sondear(ruta)['audio']:
+            ctx.aviso(f'{nombre} no tiene sonido: el video sale sin esa música.')
+            return None
+        return ruta
+
     def cancion(clave):
-        # la del proyecto (biblioteca, en Storage) o la de la marca
+        # La que se subio con el video (lf_archivos tipo musica, rol = intro/fondo/cierre), la que se eligio
+        # de la biblioteca para este video (spec.musica_<clave>, en Storage) o la del estilo de la marca.
+        from pathlib import Path
+        subida = next((a for a in ctx.archivos('musica') if a.get('rol') == clave), None)
+        if subida:
+            return con_audio(str(ctx.local(subida)), subida.get('nombre') or 'La música')
         ruta = ctx.spec.get(f'musica_{clave}')
         if ruta:
-            from pathlib import Path
-            return str(ctx.local({'ruta': ruta, 'nombre_local': f'musica_{clave}_{Path(ruta).name}'}))
-        return m.musica(clave)
+            return con_audio(str(ctx.local({'ruta': ruta, 'nombre_local': f'musica_{clave}_{Path(ruta).name}'})), 'La música elegida')
+        return con_audio(m.musica(clave), 'La música de la marca')
     musica_intro = cancion('intro')
     musica_cierre = cancion('cierre')
+    musica_fondo = cancion('fondo')
+    if musica_fondo:
+        # Fondo: bajo toda la conversacion, en bucle si es corta, y baja sola cuando alguien habla (ducking).
+        vol = float(ctx.opcion('volumen_fondo', m.cfg.get('musica', {}).get('volumen_fondo', 0.35)))
+        a0, n = int(intro * sr), int(tot / ctx.FPS * sr)
+        y = bucle(carga(musica_fondo, f'loudnorm=I={lufs_fondo(vol):.1f}:TP=-3'), n, sr)
+        y *= ganancia_ducking(mix[a0:a0 + n].mean(axis=1), sr, float(ctx.opcion('fondo_baja_db', 10)))[:, None]
+        y[:int(1.5 * sr)] *= np.linspace(0, 1, min(int(1.5 * sr), len(y)))[:, None]
+        put(fo(y, 2.5), intro)
     if musica_intro:
         put(fo(carga(musica_intro, f'loudnorm=I={lufs}:TP=-1.5')[:int(intro * sr)], 1.6), 0)
     if musica_cierre:

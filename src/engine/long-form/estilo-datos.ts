@@ -4,6 +4,7 @@ import path from "node:path"
 import { kitActivo } from "../marca/kit"
 import { estiloDesdeConfig } from "../render/theme"
 import { supabaseAdmin } from "../supabase-admin"
+import type { FormatoAudio } from "./audio"
 import { ESTILO_BASE, normalizarEstilo, type Archivo, type CtaVideo, type EstiloLongForm, type Fuente } from "./estilo"
 import type { Recursos } from "./plantillas"
 
@@ -170,7 +171,7 @@ export async function recursosDe(e: EstiloLongForm): Promise<Recursos> {
 
 // ------------------------------------------------------------------ biblioteca de audio
 
-export type Audio = { id: string; tipo: "musica" | "sfx"; momento: string | null; nombre: string; formato: "mp3" | "wav"; bytes: number; duracion: number | null }
+export type Audio = { id: string; tipo: "musica" | "sfx"; momento: string | null; nombre: string; formato: FormatoAudio; bytes: number; duracion: number | null }
 
 export async function bibliotecaDe(accountId: string): Promise<Audio[]> {
   const { data, error } = await supabaseAdmin()
@@ -179,7 +180,7 @@ export async function bibliotecaDe(accountId: string): Promise<Audio[]> {
     .eq("account_id", accountId)
     .order("created_at", { ascending: false })
   if (error) return []
-  return ((data ?? []) as { id: string; tipo: "musica" | "sfx"; momento: string | null; nombre: string; formato: "mp3" | "wav"; bytes: number; duracion_s: number | null }[]).map((f) => ({
+  return ((data ?? []) as { id: string; tipo: "musica" | "sfx"; momento: string | null; nombre: string; formato: FormatoAudio; bytes: number; duracion_s: number | null }[]).map((f) => ({
     id: f.id,
     tipo: f.tipo,
     momento: f.momento,
