@@ -3,7 +3,11 @@
 import { revalidatePath } from "next/cache"
 import QRCode from "qrcode"
 
-import { formatoPorFirma, formatoPorNombre, MAX_AUDIO_BYTES, MENSAJE_FORMATO, mimeDe } from "@/engine/long-form/audio"
+import { readFile } from "node:fs/promises"
+import path from "node:path"
+
+import { contenedorDe, FORMATOS_AUDIO, formatoPorFirma, formatoPorNombre, maxBytesDe, MENSAJE_FORMATO, mensajeTamano, mimeDe, type FormatoAudio } from "@/engine/long-form/audio"
+import { sfxStudioDe } from "@/engine/long-form/sfx-studio"
 import { normalizarEstilo, type Archivo, type EstiloLongForm } from "@/engine/long-form/estilo"
 import { BUCKET_LF, guardarEstilo, recursosDe } from "@/engine/long-form/estilo-datos"
 import { ejemplo, paginaDePieza, paginaDeSubtitulo, type Disposicion, type TipoPieza } from "@/engine/long-form/plantillas"
@@ -62,7 +66,7 @@ export async function prepararSubidaAudio(datos: { nombre: string; mime: string;
     const accountId = await idDeCuentaCon("estilo_long_form")
     const formato = formatoPorNombre(datos.nombre, datos.mime)
     if (!formato) return { ok: false, error: MENSAJE_FORMATO }
-    if (!(datos.bytes > 0) || datos.bytes > MAX_AUDIO_BYTES) return { ok: false, error: "El archivo no puede pasar de 50 MB." }
+    if (!(datos.bytes > 0) || datos.bytes > maxBytesDe(formato)) return { ok: false, error: mensajeTamano(formato) }
     const ruta = `${accountId}/estilo/audio/${crypto.randomUUID()}.${formato}`
     const { data, error } = await supabaseAdmin().storage.from(BUCKET_LF).createSignedUploadUrl(ruta)
     if (error || !data) return { ok: false, error: `No se pudo preparar la subida: ${error?.message ?? "sin respuesta"}` }
@@ -73,8 +77,9 @@ export async function prepararSubidaAudio(datos: { nombre: string; mime: string;
 }
 
 /**
- * Paso 2: con el archivo ya subido, el servidor lee su firma. Si no es MP3 o WAV de verdad (un MP4
- * renombrado, por ejemplo), se borra y se rechaza.
+ * Paso 2: con el archivo ya subido, el servidor lee su firma. Si por dentro no es lo que dice la
+ * extension (un PDF renombrado a .mp3, por ejemplo), se borra y se rechaza. De un MP4 o MOV se usa el
+ * audio: el motor lo extrae al editar y avisa si el video no trae sonido.
  */
 export async function registrarAudio(datos: {
   ruta: string
@@ -87,11 +92,17 @@ export async function registrarAudio(datos: {
     const accountId = await idDeCuentaCon("estilo_long_form")
     if (!datos.ruta.startsWith(`${accountId}/estilo/audio/`)) return { ok: false, error: "Esa subida no es de esta marca." }
     const db = supabaseAdmin()
-    const { data, error } = await db.storage.from(BUCKET_LF).download(datos.ruta)
-    if (error || !data) return { ok: false, error: "No encontramos el archivo subido. Intenta otra vez." }
-    const bytes = new Uint8Array(await data.arrayBuffer())
-    const esperado = datos.ruta.endsWith(".mp3") ? "mp3" : "wav"
-    if (formatoPorFirma(bytes.subarray(0, 16)) !== esperado) {
+    // Solo los primeros bytes: un video puede pesar 200 MB y para la firma bastan 16.
+    const { data: firmada } = await db.storage.from(BUCKET_LF).createSignedUrl(datos.ruta, 60)
+    const r = firmada?.signedUrl ? await fetch(firmada.signedUrl, { headers: { Range: "bytes=0-15" } }) : null
+    if (!r || !r.ok) return { ok: false, error: "No encontramos el archivo subido. Intenta otra vez." }
+    const cabeza = new Uint8Array(await r.arrayBuffer()).subarray(0, 16)
+    // El tamano real: "bytes 0-15/<total>" si el servidor respeto el rango; si no, lo que llego entero.
+    const total = Number(/\/(\d+)$/.exec(r.headers.get("content-range") ?? "")?.[1] ?? Number.NaN)
+    const tamano = Number.isFinite(total) ? total : Number(r.headers.get("content-length") ?? 0)
+    const ext = datos.ruta.split(".").pop() ?? ""
+    const esperado = (FORMATOS_AUDIO as readonly string[]).includes(ext) ? (ext as FormatoAudio) : null
+    if (!esperado || formatoPorFirma(cabeza) !== contenedorDe(esperado)) {
       await db.storage.from(BUCKET_LF).remove([datos.ruta])
       return { ok: false, error: `${MENSAJE_FORMATO} Este archivo no lo es por dentro.` }
     }
@@ -104,7 +115,7 @@ export async function registrarAudio(datos: {
         nombre: datos.nombre.slice(0, 120),
         ruta: datos.ruta,
         formato: esperado,
-        bytes: bytes.byteLength,
+        bytes: tamano > 0 ? tamano : 1,
         duracion_s: datos.duracion && Number.isFinite(datos.duracion) ? datos.duracion : null,
         verificado: true,
       })
@@ -133,14 +144,22 @@ export async function borrarAudio(id: string): Promise<Hecho> {
   }
 }
 
-/** Una URL de una hora para escuchar un audio de la biblioteca. */
+/**
+ * Para escuchar un audio: los de la biblioteca de la marca con una URL de una hora; los de Studio
+ * (`studio:<slug>`, archivos chicos del repo) como data URL.
+ */
 export async function urlDeAudio(id: string): Promise<Hecho<{ url: string; mime: string }>> {
   try {
     const accountId = await idDeCuentaCon("estilo_long_form")
+    const deStudio = sfxStudioDe(id)
+    if (deStudio) {
+      const wav = await readFile(path.join(process.cwd(), "long-form", "plantillas", "sfx", `${deStudio.slug}.wav`))
+      return { ok: true, url: `data:audio/wav;base64,${wav.toString("base64")}`, mime: "audio/wav" }
+    }
     const db = supabaseAdmin()
     const { data } = await db.from("lf_biblioteca").select("ruta, formato").eq("account_id", accountId).eq("id", id).maybeSingle()
     if (!data) return { ok: false, error: "Ese audio ya no existe." }
-    const f = data as { ruta: string; formato: "mp3" | "wav" }
+    const f = data as { ruta: string; formato: FormatoAudio }
     const { data: firmada } = await db.storage.from(BUCKET_LF).createSignedUrl(f.ruta, 3600)
     if (!firmada?.signedUrl) return { ok: false, error: "No se pudo abrir el audio." }
     return { ok: true, url: firmada.signedUrl, mime: mimeDe(f.formato) }

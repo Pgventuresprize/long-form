@@ -20,7 +20,7 @@ import {
 } from "@/engine/long-form/estilo"
 import type { Audio } from "@/engine/long-form/estilo-datos"
 
-import { SelectorAudio } from "./audio"
+import { SelectorAudio, sfxDeStudio } from "./audio"
 import { Campo, ColorCampo, Opciones, Seccion, SubirArchivo } from "./campos"
 import { VistaPrevia } from "./vista-previa"
 
@@ -168,12 +168,25 @@ export function EditorEstilo({
         ) : null}
       </Seccion>
 
-      <Seccion titulo="Música y efectos" descripcion="Solo MP3 o WAV. Sin música, el video empieza y termina en silencio.">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <SelectorAudio etiqueta="Música de intro" tipo="musica" momento="intro" valor={e.musica.intro} biblioteca={biblioteca} onSubido={subido} onCambio={(id) => set("musica", { ...e.musica, intro: id })} />
+      <Seccion
+        titulo="Música y efectos"
+        descripcion="Audio (MP3, WAV, M4A) o un video MP4 o MOV, del que se usa el sonido. Sin música, el video empieza y termina en silencio. La de fondo suena bajo toda la conversación y baja sola cuando alguien habla."
+      >
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <SelectorAudio etiqueta="Música de inicio" tipo="musica" momento="intro" valor={e.musica.intro} biblioteca={biblioteca} onSubido={subido} onCambio={(id) => set("musica", { ...e.musica, intro: id })} />
+          <SelectorAudio etiqueta="Música de fondo" tipo="musica" momento="fondo" valor={e.musica.fondo} biblioteca={biblioteca} onSubido={subido} onCambio={(id) => set("musica", { ...e.musica, fondo: id })} />
           <SelectorAudio etiqueta="Música de cierre" tipo="musica" momento="cierre" valor={e.musica.cierre} biblioteca={biblioteca} onSubido={subido} onCambio={(id) => set("musica", { ...e.musica, cierre: id })} />
         </div>
-        <Volumen etiqueta="Volumen de la música" valor={e.musica.volumen} onCambio={(v) => set("musica", { ...e.musica, volumen: v })} />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Volumen etiqueta="Volumen de inicio y cierre" valor={e.musica.volumen} onCambio={(v) => set("musica", { ...e.musica, volumen: v })} />
+          <Volumen etiqueta="Volumen del fondo" valor={e.musica.volumen_fondo} onCambio={(v) => set("musica", { ...e.musica, volumen_fondo: v })} />
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" size="sm" variant="outline" onClick={() => set("sfx", sfxDeStudio(e.sfx))}>
+            Usar los sonidos de Studio
+          </Button>
+          <span className="text-muted-foreground text-xs">Gratis y genéricos. Llena los momentos que no tienen efecto; luego puedes cambiar cualquiera.</span>
+        </div>
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {MOMENTOS_SFX.map((m) => (
             <SelectorAudio key={m} etiqueta={NOMBRE_MOMENTO[m]} tipo="sfx" momento={m} valor={e.sfx[m]} biblioteca={biblioteca} onSubido={subido} onCambio={(id) => set("sfx", { ...e.sfx, [m]: id })} />

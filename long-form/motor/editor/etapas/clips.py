@@ -19,7 +19,7 @@ import unicodedata
 import numpy as np
 
 from .. import ffm, ia
-from ..contexto import Mapa
+from ..contexto import Mapa, desfase
 from .. import tipos
 
 ESQUEMA = {'type': 'object', 'required': ['clips'], 'properties': {'clips': {'type': 'array', 'items': {
@@ -95,27 +95,45 @@ def palabras(segs, a, b, mapa, fix, o0):
     return out
 
 
-def srt(ws, ruta):
-    def ts(t):
-        ms = int(round(t * 1000))
-        return f'{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}'
-    cues, cur = [], []
+def tarjetas(ws, pausa=None):
+    """Palabras (inicio, fin, texto) a tarjetas de subtitulo (inicio, fin, texto): hasta 4 palabras o 24 letras,
+    o hasta una pausa de puntuacion. Cada tarjeta se estira hasta la siguiente (como mucho 0,4 s). Con `pausa`
+    (s), un silencio mas largo que eso tambien cierra la tarjeta: en el video largo una tarjeta no se queda en
+    pantalla mientras nadie habla."""
+    grupos, cur = [], []
     for w in ws:
+        if pausa is not None and cur and w[0] - cur[-1][1] > pausa:
+            grupos.append(cur)
+            cur = []
         cur.append(w)
         txt = ' '.join(x[2] for x in cur)
         if len(cur) >= 4 or re.search(r'[.?!,;:]$', w[2]) or len(txt) > 24:
-            cues.append(cur)
+            grupos.append(cur)
             cur = []
     if cur:
-        cues.append(cur)
+        grupos.append(cur)
+    out = []
+    for i, c in enumerate(grupos, 1):
+        s, e = c[0][0], c[-1][1]
+        if i < len(grupos):
+            e = max(e, min(grupos[i][0][0], e + 0.4))
+        txt = re.sub(r'[.,;:]+(?=\s|$)', '', ' '.join(x[2] for x in c)).strip()
+        out.append((s, max(e, s + 0.3), txt))
+    return out
+
+
+def escribir_srt(cues, ruta):
+    def ts(t):
+        ms = int(round(t * 1000))
+        return f'{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d},{ms % 1000:03d}'
     with open(ruta, 'w', encoding='utf8') as f:
-        for i, c in enumerate(cues, 1):
-            s, e = c[0][0], c[-1][1]
-            if i < len(cues):
-                e = max(e, min(cues[i][0][0], e + 0.4))
-            txt = re.sub(r'[.,;:]+(?=\s|$)', '', ' '.join(x[2] for x in c)).strip()
-            f.write(f'{i}\n{ts(s)} --> {ts(max(e, s + 0.3))}\n{txt}\n\n')
+        for i, (s, e, txt) in enumerate(cues, 1):
+            f.write(f'{i}\n{ts(s)} --> {ts(e)}\n{txt}\n\n')
     return ruta
+
+
+def srt(ws, ruta):
+    return escribir_srt(tarjetas(ws), ruta)
 
 
 def ass(ctx, srt_ruta, salida, formato, tamano, y):
@@ -166,8 +184,15 @@ ENC = ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-maxrate', '10M', 
 def render_real(ctx, video, o0, dur, audio, subs, salida):
     FPS = ctx.FPS
     ac = ctx.marca.c['acento'].lstrip('#')
-    fc = (f'color=c=0x{ac}:s=1080x1920:r={FPS}:d={dur:.3f}[bg];[0:v]scale=1080:608:flags=lanczos[v];'
-          f'[bg][v]overlay=0:656:shortest=1[c1];[c1][1:v]overlay=(W-w)/2:470[c2]')
+    if ctx.formato == '9:16':
+        # el video largo ya es vertical: el clip es ese tramo tal cual
+        fc = f'[0:v]scale=1080:1920:flags=lanczos,setsar=1[c2]'
+    elif ctx.formato == '1:1':
+        fc = (f'color=c=0x{ac}:s=1080x1920:r={FPS}:d={dur:.3f}[bg];[0:v]scale=1080:1080:flags=lanczos[v];'
+              f'[bg][v]overlay=0:420:shortest=1[c1];[c1][1:v]overlay=(W-w)/2:178[c2]')
+    else:
+        fc = (f'color=c=0x{ac}:s=1080x1920:r={FPS}:d={dur:.3f}[bg];[0:v]scale=1080:608:flags=lanczos[v];'
+              f'[bg][v]overlay=0:656:shortest=1[c1];[c1][1:v]overlay=(W-w)/2:470[c2]')
     fc += f";[c2]ass='{ffm.ruta_filtro(subs)}'[o]" if subs else ';[c2]null[o]'
     ffm.correr(['-ss', f'{o0:.3f}', '-t', f'{dur + 0.2:.3f}', '-i', video, '-loop', '1', '-i', png_logo(ctx), '-i', audio,
                 '-filter_complex', fc, '-map', '[o]', '-map', '2:a', '-t', f'{dur:.3f}', '-r', str(FPS)] + ENC +
@@ -289,12 +314,23 @@ def correr(ctx):
         return
     r = ctx.estado['render']
     from pathlib import Path
-    video = Path(r['local'])
-    if not video.exists():
-        video = ctx.alm.traer(ctx.pid, r['remoto'], ctx.salida / r['archivo'])
+    subt = ctx.opcion('subtitulos_clips', True)
+    # Si el largo lleva subtitulos quemados, los clips salen del mismo video sin ellos (queda en la cache del
+    # render). Si este motor no lo tiene, se usa el final y los clips no suman otros encima.
+    final = Path(r['local'])
+    if not final.exists():
+        final = ctx.alm.traer(ctx.pid, r['remoto'], ctx.salida / r['archivo'])
+    video = final                         # la imagen; el sonido sale siempre del final (el limpio no tiene audio)
+    limpio = Path(r['limpio']) if r.get('limpio') else None
+    if limpio is not None and limpio.exists():
+        video = limpio
+    else:
+        if r.get('subtitulos') and subt:
+            subt = False
+            ctx.aviso('Los clips llevan los subtítulos del video largo (este motor no tiene la copia sin subtítulos).')
     gr = ctx.estado['graficos']
     keep = [tuple(k) for k in ctx.estado['keep']]
-    mapa = Mapa(keep, ctx.FPS, gr['intro_s'])
+    mapa = Mapa(keep, ctx.FPS, desfase(gr))
     segs = ctx.json_trabajo('transcripcion.json')
     g = ctx.aprobado('guion') or {}
     prohibidos = [(c['inicio'], c['fin']) for c in g.get('cortes', []) if c.get('aplicar')]
@@ -309,8 +345,10 @@ def correr(ctx):
         ctx.aviso('Sin clave de Claude: los clips salen de las citas del guion y sin captions.')
     props = [p for p in props if not any(a < p['fin'] and b > p['inicio'] for a, b in prohibidos)]
     fix = corrector(ctx)
-    subt = ctx.opcion('subtitulos_clips', True)
     hechos = []
+    # en un largo vertical la franja de graficos va abajo: los subtitulos del clip, donde los del largo
+    y_real = 0.60 if ctx.formato == '9:16' else 0.80
+    dividido = tipos.de(ctx).clip_dividido() and (ctx.formato == '16:9' or ctx.tipo == 'camaras')
     for i, p in enumerate(props[:n], 1):
         ctx.avance(f'Clip {i} de {min(n, len(props))}', .05 + .9 * (i - 1) / max(min(n, len(props)), 1))
         o0 = mapa.cuadro(p['inicio']) / ctx.FPS
@@ -320,18 +358,19 @@ def correr(ctx):
             continue
         base = f'{i:02d}_{slug(p["titulo"])}'
         audio = d / f'{base}.wav'
-        ffm.correr(['-ss', f'{mapa.intro + o0:.3f}', '-t', f'{dur:.3f}', '-i', video, '-vn', '-af',
+        ffm.correr(['-ss', f'{mapa.intro + o0:.3f}', '-t', f'{dur:.3f}', '-i', final, '-vn', '-af',
                     f'loudnorm=I=-14:TP=-1.5:LRA=11,afade=t=in:d=0.06,afade=t=out:st={max(dur - 0.25, 0):.3f}:d=0.25',
                     '-ar', '48000', '-ac', '2', audio])
         ws = palabras(segs, p['inicio'], p['fin'], mapa, fix, o0)
         s_srt = srt(ws, ctx.salida / f'{base}.srt')
-        subs_real = ass(ctx, s_srt, d / f'{base}_real.ass', '9:16', 64, 0.80) if subt else None
+        subs_real = ass(ctx, s_srt, d / f'{base}_real.ass', '9:16', 64, y_real) if subt else None
         archivos = []
         sal = ctx.salida / f'{base}_real.mp4'
         render_real(ctx, video, mapa.intro + o0, dur, audio, subs_real, sal)
         archivos.append(sal)
-        # La version dividida (dos personas, una arriba y otra abajo) solo existe donde hay dos encuadres.
-        if tipos.de(ctx).clip_dividido():
+        # La version dividida (dos personas, una arriba y otra abajo) solo existe donde hay dos encuadres. De un
+        # largo vertical, la de Meet no (recorta el escenario 16:9); la de camaras sale de las fuentes.
+        if dividido:
             subs_div = ass(ctx, s_srt, d / f'{base}_div.ass', '9:16', 64, 0.5 if ctx.tipo == 'camaras' else 0.47) if subt else None
             sal = ctx.salida / f'{base}_div.mp4'
             tomas = ctx.estado.get('tomas_render') or ctx.estado['tomas']

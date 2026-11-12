@@ -23,6 +23,14 @@ SFX_MOTOR = {'rotulo': 'rotulo-entra', 'barra': 'barra-entra', 'barra_sale': 'ba
 
 GRAFICOS = {'pocos': (12, 15, 1), 'normal': (7, 9, 2), 'muchos': (5, 6, 3)}
 
+# Los mismos valores de PARAMETROS_SILENCIO en src/engine/long-form/estilo.ts (Studio los pone en
+# spec.opciones al crear el proyecto). El referente los usa para imitar que tan apretados van los silencios.
+SILENCIOS = {
+    'suave': {'silencio_k': 0.3, 'silencio_min': 1.0, 'silencio_aire': 0.3},
+    'normal': {'silencio_k': 0.35, 'silencio_min': 0.6, 'silencio_aire': 0.18},
+    'fuerte': {'silencio_k': 0.4, 'silencio_min': 0.4, 'silencio_aire': 0.12},
+}
+
 
 def _esc(s):
     return s.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
@@ -83,6 +91,13 @@ def armar(cfg, bajar, destino, biblioteca):
                             'sub': marcado(c.get('apoyo', ''), 'b'), 'cta': c.get('boton', ''), 'cap': c.get('pie', '')}
 
     def audio(aid):
+        if aid and aid.startswith('studio:'):
+            # Biblioteca de Studio: sonidos genericos que vienen con el motor (plantillas/sfx/generar.py).
+            origen = config.SFX_STUDIO / f'{aid[len("studio:"):]}.wav'
+            if not origen.exists():
+                return None
+            shutil.copy2(origen, d / 'audio' / origen.name)
+            return f'audio/{origen.name}'
         fila = biblioteca.get(aid) if aid else None
         if not fila:
             return None
@@ -106,9 +121,11 @@ def armar(cfg, bajar, destino, biblioteca):
         'handle': cfg.get('handle', ''),
         'web': cfg.get('web', ''),
         'ctas': ctas,
-        'musica': {'intro': audio(musica.get('intro')), 'cierre': audio(musica.get('cierre')),
-                   'volumen': musica.get('volumen', 0.8), 'loudness_lufs': musica.get('loudness_lufs', -17)},
-        'sfx': {SFX_MOTOR[k]: audio(v) for k, v in sfx.items() if k in SFX_MOTOR and v},
+        'musica': {'intro': audio(musica.get('intro')), 'fondo': audio(musica.get('fondo')), 'cierre': audio(musica.get('cierre')),
+                   'volumen': musica.get('volumen', 0.8), 'volumen_fondo': musica.get('volumen_fondo', 0.35),
+                   'loudness_lufs': musica.get('loudness_lufs', -17)},
+        # Un efecto que ya no existe (borrado de la biblioteca, slug viejo) se omite: ese momento queda sin sonido.
+        'sfx': {SFX_MOTOR[k]: r for k, v in sfx.items() if k in SFX_MOTOR and v and (r := audio(v))},
         'volumen_efectos': sfx.get('volumen', 0.7),
         'textos': textos,
         'reglas': {'barras_por_cta_min': por_cta, 'barra_cada_min': barra, 'popup_cada_min': popup,

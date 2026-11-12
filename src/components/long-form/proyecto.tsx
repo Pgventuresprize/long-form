@@ -4,14 +4,16 @@ import * as React from "react"
 import Link from "next/link"
 import { AlertCircleIcon, ArrowLeftIcon, CheckIcon, ChevronDownIcon, RotateCcwIcon } from "lucide-react"
 
-import { estadoProyecto, reintentar } from "@/app/long-form/actions"
+import { estadoProyecto, reintentar, seguirSinReferente } from "@/app/long-form/actions"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Proyecto } from "@/engine/long-form/datos"
+import { referenteDe } from "@/engine/long-form/referente"
 
 import { BadgeNivel, etapaFallida, nombreEtapa, PASOS, pasoDe, quienActua } from "./comun"
+import { TarjetaReferente } from "./referente"
 import { RevisionGuion } from "./revision-guion"
 import { RevisionReparto } from "./revision-reparto"
 import { useSubidas } from "./subidas"
@@ -49,6 +51,9 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
   const enRevision = p.fase === "revision_reparto" || p.fase === "revision_guion"
   const hayVideo = Boolean((p.estado.render as { archivo?: string } | undefined)?.archivo)
   const pestanaInicial = enRevision ? "revision" : hayVideo ? "video" : "revision"
+  const referente = referenteDe(p.estado)
+  // Si fallo el referente, el mensaje del motor ya dice que hacer (subir el archivo): se muestra tal cual.
+  const fallaReferente = p.tablero === "error" && etapaFallida(p) === "referente"
 
   return (
     <div className="flex flex-col gap-5">
@@ -68,7 +73,9 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
           <AlertCircleIcon className="text-destructive size-5 shrink-0" aria-hidden />
           <div className="min-w-0 flex-1 text-sm">
             <div className="font-medium">No se pudo terminar: {nombreEtapa(etapaFallida(p) ?? p.trabajos.find((t) => t.estado === "error")?.etapa ?? p.fase)}</div>
-            <div className="text-muted-foreground">Reintenta: retoma desde este paso y conserva todo lo anterior.</div>
+            <div className="text-muted-foreground">
+              {fallaReferente ? `${(p.detalle ?? "").replace(/^referente:\s*/, "")} También puedes seguir sin referente.` : "Reintenta: retoma desde este paso y conserva todo lo anterior."}
+            </div>
             {p.detalle ? (
               <details className="text-muted-foreground mt-1 text-xs">
                 <summary className="cursor-pointer">Detalle técnico</summary>
@@ -90,6 +97,21 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
             <RotateCcwIcon />
             Reintentar
           </Button>
+          {fallaReferente ? (
+            <Button
+              variant="outline"
+              disabled={ocupado}
+              onClick={() =>
+                start(async () => {
+                  const r = await seguirSinReferente(p.id)
+                  if (!r.ok) setError(r.error)
+                  else await refrescar()
+                })
+              }
+            >
+              Seguir sin referente
+            </Button>
+          ) : null}
         </div>
       ) : actua.tuyo && enRevision ? (
         <div className="bg-warning-soft flex items-center gap-3 rounded-xl p-4 text-sm" role="status">
@@ -116,7 +138,8 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
           </TabsTrigger>
           <TabsTrigger value="difusion">Difusión</TabsTrigger>
         </TabsList>
-        <TabsContent value="revision">
+        <TabsContent value="revision" className="flex flex-col gap-4">
+          {referente ? <TarjetaReferente r={referente} modo="revision" /> : null}
           {p.fase === "revision_reparto" ? (
             <RevisionReparto p={p} urls={urls} alAprobar={refrescar} />
           ) : p.fase === "revision_guion" ? (
@@ -125,7 +148,10 @@ export function ProyectoLongForm({ inicial, urlsIniciales }: { inicial: Proyecto
             <Vacio texto={p.estado.guion_aprobado ? "El guion ya está aprobado. Para cambiarlo, usa Corregir en la pestaña Video." : p.esfuerzo === "rapido" ? "En Rápido la IA decide quién es quién y el guion: no hay revisión." : "La revisión aparece aquí cuando Studio termine de analizar el video."} />
           )}
         </TabsContent>
-        <TabsContent value="video">{hayVideo ? <VistaVideo p={p} urls={urls} alCorregir={refrescar} /> : null}</TabsContent>
+        <TabsContent value="video" className="flex flex-col gap-4">
+          {hayVideo ? <VistaVideo p={p} urls={urls} alCorregir={refrescar} /> : null}
+          {hayVideo && referente ? <TarjetaReferente r={referente} modo="video" /> : null}
+        </TabsContent>
         <TabsContent value="difusion">
           <Vacio texto="Las ideas, los clips y los carruseles aparecen aquí apenas esté la transcripción." />
         </TabsContent>

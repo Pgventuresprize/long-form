@@ -95,7 +95,11 @@ export type EstiloLongForm = {
   redes: [string, string][]
   textos: { pie_intro: string; cierre_titulo: string; pregunta: string; popup: string; en_esta_sesion: string }
   ctas: CtaVideo[]
-  musica: { intro: string | null; cierre: string | null; volumen: number; loudness_lufs: number }
+  /**
+   * Ids de `lf_biblioteca`. `fondo` suena bajo toda la conversacion y baja sola cuando alguien habla
+   * (ducking en render.py); `volumen_fondo` es su nivel, aparte del de inicio y cierre.
+   */
+  musica: { intro: string | null; fondo: string | null; cierre: string | null; volumen: number; volumen_fondo: number; loudness_lufs: number }
   sfx: Partial<Record<MomentoSfx, string | null>> & { volumen: number }
   subtitulos: {
     /** La fuente del estilo o una de Studio. */
@@ -150,7 +154,7 @@ export const ESTILO_BASE: EstiloLongForm = {
   redes: [],
   textos: { pie_intro: "", cierre_titulo: "Síguenos", pregunta: "Pregunta", popup: "Síguenos", en_esta_sesion: "En esta sesión" },
   ctas: [],
-  musica: { intro: null, cierre: null, volumen: 0.8, loudness_lufs: -17 },
+  musica: { intro: null, fondo: null, cierre: null, volumen: 0.8, volumen_fondo: 0.35, loudness_lufs: -17 },
   sfx: { volumen: 0.7 },
   subtitulos: { fuente: "marca", tamano: "mediano", color: "#ffffff", fondo: "#000000", fondo_alfa: 0.85, resaltado: "", mayusculas: true },
   silencios: "normal",
@@ -179,9 +183,11 @@ export function normalizarEstilo(bruto: unknown): EstiloLongForm {
   const cl = (r.clips ?? {}) as Record<string, unknown>
   const lg = (r.logo ?? {}) as Record<string, unknown>
   const id = (v: unknown) => (typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v) ? v : null)
+  // Un efecto tambien puede ser de la biblioteca de Studio: `studio:<slug>` (sfx-studio.ts).
+  const idSfx = (v: unknown) => id(v) ?? (typeof v === "string" && /^studio:[a-z0-9-]{1,40}$/.test(v) ? v : null)
 
   const sfx: EstiloLongForm["sfx"] = { volumen: num(s.volumen, b.sfx.volumen, 0, 1) }
-  for (const k of MOMENTOS_SFX) sfx[k] = id(s[k])
+  for (const k of MOMENTOS_SFX) sfx[k] = idSfx(s[k])
 
   const formatos = Array.isArray(cl.formatos) ? cl.formatos.filter((x): x is FormatoClip => (FORMATOS_CLIP as readonly unknown[]).includes(x)) : b.clips.formatos
   const dmin = num(cl.duracion_min, b.clips.duracion_min, 15, 120)
@@ -245,7 +251,14 @@ export function normalizarEstilo(bruto: unknown): EstiloLongForm {
       en_esta_sesion: txt(t.en_esta_sesion, b.textos.en_esta_sesion, 40) || b.textos.en_esta_sesion,
     },
     ctas,
-    musica: { intro: id(m.intro), cierre: id(m.cierre), volumen: num(m.volumen, b.musica.volumen, 0, 1), loudness_lufs: num(m.loudness_lufs, b.musica.loudness_lufs, -30, -8) },
+    musica: {
+      intro: id(m.intro),
+      fondo: id(m.fondo),
+      cierre: id(m.cierre),
+      volumen: num(m.volumen, b.musica.volumen, 0, 1),
+      volumen_fondo: num(m.volumen_fondo, b.musica.volumen_fondo, 0, 1),
+      loudness_lufs: num(m.loudness_lufs, b.musica.loudness_lufs, -30, -8),
+    },
     sfx,
     subtitulos: {
       fuente: sub.fuente === "studio" ? "studio" : "marca",

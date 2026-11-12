@@ -112,22 +112,33 @@ class Pintor:
         lst.unlink(missing_ok=True)
         return dest
 
-    def pagina(self, tipo, datos, png):
+    def pagina(self, tipo, datos, png, tamano=None):
+        """Una imagen fija. `tamano` (ancho, alto): otro lienzo (las tarjetas de un video 9:16 o 1:1)."""
         hp = self.dir / (png.stem + '.html')
-        hp.write_text(plantillas.pagina(self.ctx.marca, tipo, datos), encoding='utf8')
+        if tamano:
+            hp.write_text(plantillas.pagina(self.ctx.marca, tipo, datos, ancho=tamano[0], alto=tamano[1]), encoding='utf8')
+            self.page.set_viewport_size({'width': tamano[0], 'height': tamano[1]})
+        else:
+            hp.write_text(plantillas.pagina(self.ctx.marca, tipo, datos), encoding='utf8')
         self.page.goto(hp.resolve().as_uri())
         self.page.evaluate('document.fonts.ready')
         self.page.wait_for_timeout(200)
         self.page.screenshot(path=str(png))
+        if tamano:
+            self.page.set_viewport_size({'width': W, 'height': HH})
         return png
 
 
 def tarjetas(ctx, pintor, g):
     t = g.get('titulo') or ctx.spec.get('titulo', '')
     d = ctx.tj('piezas')
+    from ..lienzo import TAMANOS
+    tam = TAMANOS.get(ctx.formato)
+    # en 9:16 y 1:1 las tarjetas se dibujan en su lienzo (y la de intro es la portada)
+    suf = f'-{tam[0]}x{tam[1]}' if tam else ''
     pi = pintor.pagina('tarjeta-intro', {'titulo': t, 'subtitulo': g.get('subtitulo_intro', ''), 'pie': g.get('pie_intro')},
-                       d / 'tarjeta-intro.png')
-    pc = pintor.pagina('tarjeta-cierre', {}, d / 'tarjeta-cierre.png')
+                       d / f'tarjeta-intro{suf}.png', tam)
+    pc = pintor.pagina('tarjeta-cierre', {}, d / f'tarjeta-cierre{suf}.png', tam)
     return pi, pc
 
 # ---------------------------------------------------------------- ilustraciones
@@ -214,7 +225,9 @@ def armar(ctx, g, mapa, personas):
     items = []
     # exclusivas primero: fijan la franja (las etiquetas del plano doble abren el programa)
     excl = []
-    if ctx.tipo == 'camaras' and len(personas) >= 2 and ctx.opcion('etiquetas_plano_doble', True):
+    # en 9:16 y 1:1 el plano doble va apilado: las etiquetas de izquierda y derecha no corresponden
+    if (ctx.tipo == 'camaras' and len(personas) >= 2 and ctx.opcion('etiquetas_plano_doble', True)
+            and ctx.formato == '16:9'):
         ids = ctx.estado['analisis']['claves']
         nombres = {p['id']: p['nombre'] for p in ctx.aprobado('reparto')['personas']}
         items.append({'tipo': 'etiquetas', 'a': 0.3, 'dur': 5.0, 'izquierda': nombres.get(ids[0], ''), 'derecha': nombres.get(ids[1], '')})
@@ -265,7 +278,10 @@ def armar(ctx, g, mapa, personas):
         items.append({'tipo': 'cita', 'a': a, 'dur': dur, 'texto': c['texto'], 'quien': c['quien'], 'rol': c.get('rol', '')})
     # ilustraciones
     for il in g.get('ilustraciones', []):
-        if il.get('t') is None or il.get('omitir'):
+        if il.get('omitir'):
+            continue
+        if il.get('t') is None:
+            ctx.aviso(f'La ilustración {il.get("archivo", "")} no tiene momento en el guion: no entra en el video.')
             continue
         modo = il.get('modo', 'foto')
         dur = float(il.get('dur') or {'foto': 6.0, 'video': 6.0, 'recorrido': 16.0}[modo])
@@ -404,7 +420,24 @@ def correr(ctx):
     ajustadas = tipo.tomas_render(ctx, items, mapa)
     if ajustadas is not None:
         ctx.guardar('tomas_render', ajustadas)
-    ctx.guardar('graficos', {'piezas': piezas, 'intro': str(pi), 'cierre': str(pc), 'disposicion': disp,
-                             'intro_s': INTRO, 'cierre_s': OUTRO})
+    info = {'piezas': piezas, 'intro': str(pi), 'cierre': str(pc), 'disposicion': disp,
+            'intro_s': INTRO, 'cierre_s': OUTRO}
+    gancho = g.get('gancho')
+    if gancho and not gancho.get('omitir'):
+        # el gancho abre el video antes de la tarjeta: lo conservado de su tramo (sin silencios ni cortes)
+        from .render import tramos_gancho
+        a, b = float(gancho['inicio']), float(gancho['fin'])
+        if b - a > 30:
+            # la persona lo alargo en la revision: un gancho de mas de medio minuto ya no es un gancho
+            b = a + 30
+            ctx.aviso('El gancho pasaba de 30 s: se acortó a 30 s.')
+        kg = tramos_gancho(keep, a, b, ctx.FPS)
+        if kg:
+            info['gancho_keep'] = kg
+            info['gancho_s'] = Mapa(kg, ctx.FPS, 0.0).total / ctx.FPS
+            ctx.log(f'gancho {gancho["inicio"]:.1f}–{gancho["fin"]:.1f} s: {info["gancho_s"]:.1f} s antes de la intro')
+        else:
+            ctx.aviso('El gancho quedó dentro de un tramo cortado: el video abre con la intro.')
+    ctx.guardar('graficos', info)
     from collections import Counter
     ctx.log('piezas: ' + ', '.join(f'{k} {v}' for k, v in Counter(p['tipo'] for p in piezas).items()))

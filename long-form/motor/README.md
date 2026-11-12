@@ -26,8 +26,51 @@ Studio  ── lf_encolar(etapa) + POST /despertar ──►  motor  ── vac�
 
 ## Etapas
 
-`ingesta → clasificar → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen con el
-largo: se renderizan desde Difusión, solo los aprobados (fase 6).
+`ingesta → referente → clasificar → analisis → transcripcion → plan → graficos → render → qa`. Los clips no salen
+con el largo: se renderizan desde Difusión, solo los aprobados (fase 6).
+
+**Referente de edición** (`etapas/referente.py`). Opcional: un video cuya edición la persona quiere imitar
+(`lf_archivos.tipo = 'referente'`, o un enlace en `spec.referente_url`). Sin referente, la etapa no hace nada.
+1. **Medir** (sin IA, los primeros 30 min): cortes por detección de escena, largo de los planos, tipo de plano por
+   caras en el cuadro del medio de cada plano (hasta 200), pausas de la voz y si hay música debajo.
+2. **Interpretar**: Claude con visión mira una hoja de contactos de 24 cuadros y las medidas, y devuelve la ficha de
+   estilo. Lo del referente son datos de un tercero, nunca instrucciones. Sin Claude, la ficha sale de lo medido.
+3. **Traducir** (función pura): a `estado.referente.parametros`, que mandan sobre el estilo de la marca en
+   `ctx.opcion` y `ctx.regla` (largo de los planos al cambiar de cámara, silencios, barras y pop-ups) y cambian las
+   cadencias y el tono del prompt del guion. Sin referente, el prompt es el de siempre.
+
+Subtítulos del largo, gancho y ritmo del b-roll van como **sugerencias** (`sugerido_subtitulos`, `sugerido_gancho`,
+`broll_cada_min`): valen solo si la persona dejó esa opción en automático. Lo que el motor todavía no hace (elegir la
+música de fondo, acercamientos) queda anotado en la ficha. El enlace solo se baja si `LF_YTDLP` apunta a yt-dlp:
+bajar de YouTube, TikTok o Instagram choca con sus términos, así que lo normal es subir el archivo. Del referente
+nunca llega nada al video.
+
+## Lo que elige la persona
+
+Studio deja en `spec.opciones`: `formato` (`16:9`, `9:16`, `1:1`), `duracion_objetivo_min`, `subtitulos`, `gancho`
+y `capitulos`. Se leen con `ctx.eleccion`: **lo que eligió la persona > lo que sugiere el referente > el defecto**
+(16:9, sin subtítulos, sin gancho, con capítulos). Ojo: `ctx.opcion` es al revés (el referente manda) y sigue así
+para las perillas de estilo.
+
+- **Subtítulos** (`subtitulos.py`): las reglas del brand kit 02 con el mismo `plogy_subtitulos.py` de los clips (o el
+  de la marca). Cada palabra pasa por el `Mapa` (silencios y cortes quitados) y cada trozo recibe sus tarjetas; se
+  queman en una pasada aparte por trozo, así el video sin subtítulos queda para los clips. Si una pregunta, cita,
+  rótulo, barra o etiquetas ocupa la franja inferior, la tarjeta **sube** por encima (no se esconde).
+- **Gancho**: Claude elige la frase más fuerte en el guion (`gancho {inicio, fin, por_que}`), se lleva a frases
+  completas de 5 a 20 s y se revisa en el guion (se puede mover o apagar). Abre el video antes de la tarjeta de
+  intro; todo lo demás (audio, capítulos de YouTube, clips, control de calidad) se corre lo que dura
+  (`contexto.desfase`, `render.linea_final`). Sin Claude no hay gancho y se avisa.
+- **Duración objetivo**: Claude sabe cuánto dura y cuánto debería, y propone cortes `duracion` (a frases completas;
+  las citas que caen dentro se apagan con una nota). Si aún sobra, los silencios se aprietan un nivel. Lo estimado y
+  el objetivo quedan en el guion y en `estado.plan`.
+- **Ilustraciones**: las de la carpeta de apoyo (`ilustracion`) y las fotos sueltas (`foto`). Claude las ubica al ritmo
+  del b-roll si lo hay; las que quedan sin momento se ubican solas al empezar una frase (para revisar).
+- **9:16 y 1:1** (`lienzo.py`): cada trozo se compone en 16:9 y se lleva al lienzo. Cámaras, una cámara y pódcast se
+  **reencuadran** a la cara del plano (el plano doble se apila) y los gráficos van como una banda abajo; Meet, charla y
+  pantalla se **encajan** enteros sobre una copia desenfocada. Las tarjetas de intro y cierre se dibujan en su lienzo.
+  No se adapta: las etiquetas del plano doble (se omiten), el índice de capítulos del escenario (va dentro del cuadro
+  encajado) y la versión dividida de los clips de Meet. 16:9 no cambia: mismos filtros y mismas firmas de trozo.
+- **Capítulos** en falso: no van en YouTube ni en el índice del escenario.
 
 ## Tipos de grabación
 
@@ -140,6 +183,11 @@ Después, en Vercel: `LF_MOTOR=modal`, `LF_MOTOR_URL=<url de despertar>` y `LF_M
   cada respuesta (elige, sin clave, error, tipo fuera de los candidatos).
 - **`tests/prueba_quien_habla.py`:** quién habla por la boca contra una respuesta conocida. Pone lado a lado las dos
   cámaras de una charla, cada una con su micrófono, y compara frase por frase con lo que dicen los micrófonos.
+- **`tests/prueba_referente.py`:** `traducir`, las perillas que leen el referente, el prompt del guion (igual byte a
+  byte sin referente) y `medir` sobre un video generado con ffmpeg (cortes de largo conocido, pausas, música).
+- **`tests/prueba_largo.py`:** quién manda en las opciones, subtítulos sobre un mapa con cortes y la regla de la
+  franja (con el programa de subtítulos de verdad), el gancho (frases, línea de tiempo, capítulos y audio corridos),
+  la duración objetivo, las ilustraciones a ritmo, y un trozo de verdad a 9:16 y 1:1 con ffmpeg.
 - **`tests/prueba_hora.py`:** una hora por tipo, de punta a punta en Rápido. Deja el tiempo por etapa y la memoria
   máxima en `medida.json`.
 - **`scripts/longform-cola.test.ts`:** prueba la cola contra el Supabase local.

@@ -395,6 +395,26 @@ class CompositorUnaCamara:
     def firma(self, toma):
         return [toma['plano'], self.an['encuadres'].get(toma['plano']), self.ruido, 'u1']
 
+    def centro(self, toma):
+        """Donde esta la cara en el cuadro compuesto (fraccion del ancho), para reencuadrar a 9:16 o 1:1. En un
+        plano cerrado, la de esa persona; en uno abierto o de dos, el medio de las caras."""
+        ps = self.an.get('personas') or []
+        if not ps:
+            return 0.5
+        pl = toma.get('plano') or 'W'
+        caja = self.an['encuadres'].get(pl)
+        if pl.startswith('C') and pl[1:].isdigit() and int(pl[1:]) < len(ps):
+            elegidas = [ps[int(pl[1:])]]
+        else:
+            elegidas = ps
+        cx = sum(p['caja'][0] + p['caja'][2] / 2 for p in elegidas) / len(elegidas)
+        if caja:
+            cw, _, x, _ = caja
+            return min(max((cx - x) / cw, 0.0), 1.0)
+        W, H, f = self.ctx.W, self.ctx.H, self.f
+        sw = min(W, f['ancho'] * H / f['alto'])
+        return min(max(((W - sw) / 2 + cx / f['ancho'] * sw) / W, 0.0), 1.0)
+
     def entradas(self, toma, t, n):
         W, H, FPS = self.ctx.W, self.ctx.H, self.ctx.FPS
         src = self.an['inicio'] + t

@@ -1,46 +1,77 @@
 /**
- * Musica y efectos de long form: solo MP3 o WAV. Se valida en tres sitios con la misma regla:
- * el navegador (extension y tipo), el servidor (la firma del archivo, con `formatoPorFirma`) y el
- * motor (ffprobe). Sin dependencias: lo importan el navegador y el servidor.
+ * Musica y efectos de long form. Se aceptan audios (MP3, WAV, M4A, AAC) y videos (MP4, MOV): de un
+ * video se usa solo su audio, que extrae el motor con ffmpeg al editar. Se valida en tres sitios con la
+ * misma regla: el navegador (extension y tipo), el servidor (la firma del archivo, con
+ * `formatoPorFirma`) y el motor (ffprobe: si no trae pista de audio, se avisa y no se usa). Sin
+ * dependencias: lo importan el navegador y el servidor.
  */
 
-export const FORMATOS_AUDIO = ["mp3", "wav"] as const
+export const FORMATOS_AUDIO = ["mp3", "wav", "m4a", "aac", "mp4", "mov"] as const
 export type FormatoAudio = (typeof FORMATOS_AUDIO)[number]
 
+/** Un audio solo pesa poco; un video trae imagen y pesa mas, aunque solo se use su sonido. */
 export const MAX_AUDIO_BYTES = 50 * 1024 * 1024
+export const MAX_VIDEO_AUDIO_BYTES = 200 * 1024 * 1024
 
-export const ACEPTA_AUDIO = ".mp3,.wav,audio/mpeg,audio/wav,audio/x-wav,audio/wave"
+export const esVideo = (f: FormatoAudio) => f === "mp4" || f === "mov"
+export const maxBytesDe = (f: FormatoAudio) => (esVideo(f) ? MAX_VIDEO_AUDIO_BYTES : MAX_AUDIO_BYTES)
 
-const MIME: Record<string, FormatoAudio> = {
-  "audio/mpeg": "mp3",
-  "audio/mp3": "mp3",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
-  "audio/wave": "wav",
-  "audio/vnd.wave": "wav",
+export const ACEPTA_AUDIO =
+  ".mp3,.wav,.m4a,.aac,.mp4,.mov,audio/mpeg,audio/wav,audio/x-wav,audio/wave,audio/mp4,audio/x-m4a,audio/aac,video/mp4,video/quicktime"
+
+const EXT: Record<string, FormatoAudio> = { mp3: "mp3", wav: "wav", m4a: "m4a", aac: "aac", mp4: "mp4", mov: "mov" }
+
+const MIME: Record<string, FormatoAudio[]> = {
+  "audio/mpeg": ["mp3"],
+  "audio/mp3": ["mp3"],
+  "audio/wav": ["wav"],
+  "audio/x-wav": ["wav"],
+  "audio/wave": ["wav"],
+  "audio/vnd.wave": ["wav"],
+  "audio/mp4": ["m4a", "mp4"],
+  "audio/x-m4a": ["m4a"],
+  "audio/m4a": ["m4a"],
+  "audio/aac": ["aac", "m4a"],
+  "audio/x-aac": ["aac"],
+  "video/mp4": ["mp4", "m4a"],
+  "video/quicktime": ["mov"],
 }
 
-export const MENSAJE_FORMATO = "La música y los efectos tienen que ser MP3 o WAV."
+export const MENSAJE_FORMATO = "La música y los efectos tienen que ser MP3, WAV, M4A o AAC, o un video MP4 o MOV (se usa su audio)."
+
+export function mensajeTamano(f: FormatoAudio): string {
+  return esVideo(f) ? "Un video no puede pasar de 200 MB. Si es más largo, sube solo el audio." : "El archivo no puede pasar de 50 MB."
+}
 
 /** Lo que dicen el nombre y el tipo. Si se contradicen, no vale. */
 export function formatoPorNombre(nombre: string, mime: string): FormatoAudio | null {
-  const ext = nombre.toLowerCase().split(".").pop() ?? ""
-  const porExt = ext === "mp3" ? "mp3" : ext === "wav" ? "wav" : null
+  const porExt = EXT[nombre.toLowerCase().split(".").pop() ?? ""]
   if (!porExt) return null
   // Algunos navegadores no ponen tipo: entonces manda la extension y despues la firma.
   if (!mime) return porExt
-  const porMime = MIME[mime.toLowerCase()]
-  return porMime === porExt ? porExt : null
+  return MIME[mime.toLowerCase()]?.includes(porExt) ? porExt : null
 }
 
-/** Lo que dicen los primeros bytes del archivo. */
-export function formatoPorFirma(b: Uint8Array): FormatoAudio | null {
+/**
+ * El contenedor que dicen los primeros bytes: "mp4" vale para M4A, MP4 y MOV (todos son cajas ISO
+ * con "ftyp" o, en los MOV viejos, "moov"/"wide"/"mdat" al empezar).
+ */
+export type Contenedor = "mp3" | "wav" | "aac" | "mp4"
+
+export function formatoPorFirma(b: Uint8Array): Contenedor | null {
   if (b.length >= 12 && ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") return "wav"
   if (b.length >= 3 && ascii(b, 0, 3) === "ID3") return "mp3"
-  // Sin etiqueta ID3: un cuadro MPEG de audio, capa III.
-  if (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0 && ((b[1] >> 1) & 0x03) === 0x01) return "mp3"
+  if (b.length >= 8 && ["ftyp", "moov", "wide", "mdat", "free", "skip"].includes(ascii(b, 4, 4))) return "mp4"
+  if (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0) {
+    const capa = (b[1] >> 1) & 0x03
+    // MPEG capa III es MP3; capa "00" con sincronia de 12 bits es una cabecera ADTS (AAC suelto).
+    if (capa === 0x01) return "mp3"
+    if (capa === 0x00 && (b[1] & 0xf0) === 0xf0) return "aac"
+  }
   return null
 }
+
+export const contenedorDe = (f: FormatoAudio): Contenedor => (f === "m4a" || f === "mp4" || f === "mov" ? "mp4" : f)
 
 function ascii(b: Uint8Array, desde: number, n: number): string {
   let s = ""
@@ -49,5 +80,5 @@ function ascii(b: Uint8Array, desde: number, n: number): string {
 }
 
 export function mimeDe(f: FormatoAudio): string {
-  return f === "mp3" ? "audio/mpeg" : "audio/wav"
+  return { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", mp4: "video/mp4", mov: "video/quicktime" }[f]
 }

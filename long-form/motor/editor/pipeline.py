@@ -1,6 +1,6 @@
 """El recorrido de un proyecto: etapas, revisiones y que sigue despues de cada una.
 
-    ingesta -> clasificar -> analisis -> transcripcion ─┐
+    ingesta -> referente -> clasificar -> analisis -> transcripcion ─┐
                                           ▼
                               [revision 1: quien es quien]   segun el nivel
                                           │
@@ -25,10 +25,12 @@ import traceback
 from . import config, ia
 from .contexto import Contexto
 
-ORDEN = ['ingesta', 'clasificar', 'analisis', 'transcripcion', 'plan', 'graficos', 'render', 'qa', 'clips']
+# referente: sin referente no hace nada; con uno, deja los parametros que leen ctx.opcion y ctx.regla.
+ORDEN = ['ingesta', 'referente', 'clasificar', 'analisis', 'transcripcion', 'plan', 'graficos', 'render', 'qa', 'clips']
 COMPUERTAS = {'transcripcion': ('revision_reparto', 'reparto'), 'plan': ('revision_guion', 'guion')}
 # Los mismos nombres que muestra Studio (src/components/long-form/comun.tsx).
-NOMBRES = {'ingesta': 'Leyendo los archivos', 'analisis': 'Analizando quién habla', 'clasificar': 'Reconociendo el tipo de grabación',
+NOMBRES = {'ingesta': 'Leyendo los archivos', 'referente': 'Analizando el referente',
+           'analisis': 'Analizando quién habla', 'clasificar': 'Reconociendo el tipo de grabación',
            'transcripcion': 'Transcribiendo', 'plan': 'Armando el guion', 'graficos': 'Dibujando los gráficos',
            'render': 'Editando el video', 'qa': 'Revisando la calidad', 'clips': 'Haciendo los clips'}
 
