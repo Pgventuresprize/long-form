@@ -13,6 +13,7 @@ import subprocess
 from PIL import Image
 
 from .. import config, ffm
+from ..contexto import desfase
 
 
 def _detectar(ruta, filtro):
@@ -59,6 +60,8 @@ def correr(ctx):
         problemas.append(f'Video ({dur_v:.2f} s) y audio ({dur_a:.2f} s) no duran lo mismo')
     if abs(dur_v - r['duracion']) > 0.5:
         problemas.append(f'Duración {dur_v:.1f} s distinta de la esperada {r["duracion"]:.1f} s')
+    if r.get('resolucion') and r['resolucion'] != f'{info["ancho"]}x{info["alto"]}':
+        problemas.append(f'El video salió de {info["ancho"]}x{info["alto"]} y se esperaba {r["resolucion"]} ({r.get("formato")})')
     ctx.avance('Midiendo sonoridad', .2)
     lufs, pico = ffm.ebur128(ruta)
     if lufs is not None and not (-18 <= lufs <= -14):
@@ -67,7 +70,7 @@ def correr(ctx):
         problemas.append(f'Pico real {pico:.1f} dBTP: puede distorsionar')
     ctx.avance('Buscando cuadros negros', .4)
     gr = ctx.estado['graficos']
-    ini, fin = gr['intro_s'] + 0.5, dur_v - gr['cierre_s'] - 0.5
+    ini, fin = desfase(gr) + 0.5, dur_v - gr['cierre_s'] - 0.5
     negros = []
     for m in re.finditer(r'black_start:([\d.]+) black_end:([\d.]+)', _detectar(ruta, 'blackdetect=d=1.0:pix_th=0.06')):
         a, b = float(m.group(1)), float(m.group(2))
@@ -82,6 +85,8 @@ def correr(ctx):
                'resolucion': f'{info["ancho"]}x{info["alto"]}', 'problemas': problemas,
                'avisos': ctx.todos_los_avisos(), 'hoja': h.name,
                'sensibles': (ctx.aprobado('guion') or {}).get('sensibles', [])}
+    if r.get('formato'):
+        reporte.update(formato=r['formato'], subtitulos=bool(r.get('subtitulos')), gancho_s=r.get('gancho_s', 0))
     ctx.guardar('qa', reporte)
     for x in problemas:
         ctx.log(x, 'aviso')

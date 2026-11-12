@@ -289,7 +289,8 @@ class CompositorCharla(_Base):
         super().__init__(ctx)
         from .meet import Escenario
         g = ctx.aprobado('guion') or {}
-        self.esc = Escenario(ctx, g.get('capitulos', []))
+        from ..guion import capitulos_visibles
+        self.esc = Escenario(ctx, capitulos_visibles(ctx, g))
         rep = ctx.aprobado('reparto') or {'personas': []}
         self.rol = {p['nombre']: p.get('rol', '') for p in rep['personas'] if p.get('nombre')}
 
