@@ -72,6 +72,20 @@ export type CtaVideo = {
 
 export type Persona = { id: string; nombre: string; cargo: string; handle: string; red: string; foto: Archivo | null }
 
+/**
+ * Como abre y como cierra cada video largo (el motor lo resuelve en `editor/extremos.py`):
+ * - `studio`: la tarjeta de Studio con los colores, el logo y los textos de la marca (5,4 s y 6 s);
+ * - `video`: un clip ya hecho por la marca (MP4 o MOV, hasta 200 MB), que suena con su propio audio y dura lo
+ *   que dure (hasta 30 s). Sin `video` subido vale como `studio`;
+ * - `ninguna`: sin intro, o sin cierre.
+ * Cada video puede apagarlos (`spec.opciones.intro` / `cierre` en false, ver `nuevo.ts`).
+ */
+export const MODOS_EXTREMO = ["studio", "video", "ninguna"] as const
+export type ModoExtremo = (typeof MODOS_EXTREMO)[number]
+export type Extremo = { modo: ModoExtremo; video: Archivo | null }
+export const PARTES_EXTREMO = ["intro", "cierre"] as const
+export type ParteExtremo = (typeof PARTES_EXTREMO)[number]
+
 export type EstiloLongForm = {
   version: number
   colores: {
@@ -94,6 +108,9 @@ export type EstiloLongForm = {
   web: string
   redes: [string, string][]
   textos: { pie_intro: string; cierre_titulo: string; pregunta: string; popup: string; en_esta_sesion: string }
+  /** La intro y el cierre de los videos. Un estilo guardado antes de que existieran lee `studio`, lo de siempre. */
+  intro: Extremo
+  cierre: Extremo
   ctas: CtaVideo[]
   /**
    * Ids de `lf_biblioteca`. `fondo` suena bajo toda la conversacion y baja sola cuando alguien habla
@@ -132,6 +149,17 @@ const archivo = (v: unknown): Archivo | null => {
   return a && typeof a.bucket === "string" && typeof a.ruta === "string" && a.ruta ? { bucket: a.bucket, ruta: a.ruta } : null
 }
 
+/**
+ * La intro o el cierre guardados. El video se conserva aunque el modo sea otro (asi se puede volver a el sin
+ * subirlo de nuevo); `video` sin archivo vale como `studio`.
+ */
+export function normalizarExtremo(v: unknown): Extremo {
+  const o = (v ?? {}) as Record<string, unknown>
+  const video = archivo(o.video)
+  const modo = de(MODOS_EXTREMO, o.modo, "studio")
+  return { modo: modo === "video" && !video ? "studio" : modo, video }
+}
+
 export const ESTILO_BASE: EstiloLongForm = {
   version: VERSION_ESTILO,
   colores: {
@@ -153,6 +181,8 @@ export const ESTILO_BASE: EstiloLongForm = {
   web: "",
   redes: [],
   textos: { pie_intro: "", cierre_titulo: "Síguenos", pregunta: "Pregunta", popup: "Síguenos", en_esta_sesion: "En esta sesión" },
+  intro: { modo: "studio", video: null },
+  cierre: { modo: "studio", video: null },
   ctas: [],
   musica: { intro: null, fondo: null, cierre: null, volumen: 0.8, volumen_fondo: 0.35, loudness_lufs: -17 },
   sfx: { volumen: 0.7 },
@@ -250,6 +280,8 @@ export function normalizarEstilo(bruto: unknown): EstiloLongForm {
       popup: txt(t.popup, b.textos.popup, 30) || b.textos.popup,
       en_esta_sesion: txt(t.en_esta_sesion, b.textos.en_esta_sesion, 40) || b.textos.en_esta_sesion,
     },
+    intro: normalizarExtremo(r.intro),
+    cierre: normalizarExtremo(r.cierre),
     ctas,
     musica: {
       intro: id(m.intro),

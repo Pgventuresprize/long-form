@@ -15,6 +15,8 @@ la altura normal es la del formato (16:9 0,80; 9:16 0,60; 1:1 0,75). Cuando una 
 (pregunta, cita, rotulo, barra, etiquetas), la tarjeta de esa frase SUBE por encima de la franja en vez de
 esconderse: la persona sigue leyendo lo que se dice. En encajar no hace falta (los graficos van dentro del cuadro
 y los subtitulos fuera).
+
+La intro y el cierre propios de la marca (extremos.py) se llevan al lienzo del video con `encajar_video`.
 """
 
 TAMANOS = {'9:16': (1080, 1920), '1:1': (1080, 1080)}
@@ -81,6 +83,20 @@ class Lienzo:
         """(ancho, alto, x, y) de una pieza de 1920x1080 en el lienzo (modo reencuadre)."""
         y = self.centro_y if p.get('proteger') else self.banda_y
         return self.LW, self.bh, 0, y
+
+
+def encajar_video(ancho, alto, LW, LH, fps):
+    """Filtro (de [0:v] a [vp]) que lleva un video cualquiera (la intro o el cierre propios de la marca) a un
+    lienzo LW x LH. Si tiene la misma forma, solo se escala; si no, va entero al centro sobre una copia
+    desenfocada de si mismo, como `Lienzo.encajar`. Funcion pura."""
+    base = f'[0:v]setpts=PTS-STARTPTS,fps={fps},setsar=1'
+    if ancho and alto and abs(ancho / alto - LW / LH) < 0.01:
+        return f'{base},scale={LW}:{LH}:flags=lanczos,setsar=1[vp]'
+    q = 4
+    return (f'{base},split[vpf][vpc];[vpf]scale={LW // q}:{LH // q}:force_original_aspect_ratio=increase,'
+            f'crop={LW // q}:{LH // q},boxblur=10:2,scale={LW}:{LH},eq=brightness=-0.18:saturation=0.8[vpd];'
+            f'[vpc]scale={LW}:{LH}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos[vpe];'
+            f'[vpd][vpe]overlay=(W-w)/2:(H-h)/2,setsar=1[vp]')
 
 
 def lienzo_de(ctx):

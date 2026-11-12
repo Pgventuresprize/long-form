@@ -4,9 +4,9 @@ import { test } from "node:test"
 import { existsSync } from "node:fs"
 import path from "node:path"
 
-import { contenedorDe, formatoPorFirma, formatoPorNombre, maxBytesDe } from "../src/engine/long-form/audio"
+import { contenedorDe, formatoPorFirma, formatoPorNombre, formatoVideoMarca, maxBytesDe } from "../src/engine/long-form/audio"
 import { idStudio, SFX_STUDIO, SFX_SUGERIDOS, sfxStudioDe } from "../src/engine/long-form/sfx-studio"
-import { ESTILO_BASE, marcado, normalizarEstilo } from "../src/engine/long-form/estilo"
+import { ESTILO_BASE, marcado, normalizarEstilo, normalizarExtremo, VERSION_ESTILO } from "../src/engine/long-form/estilo"
 import { paginaDePieza, rellenar, type Recursos } from "../src/engine/long-form/plantillas"
 
 const bytes = (...x: (number | string)[]) => new Uint8Array(x.flatMap((v) => (typeof v === "string" ? [...v].map((c) => c.charCodeAt(0)) : [v])))
@@ -69,6 +69,29 @@ test("estilo: lo guardado se normaliza y queda dentro de sus limites", () => {
   assert.ok(e.clips.duracion_min < e.clips.duracion_max)
   assert.equal(e.esfuerzo, "normal")
   assert.deepEqual(normalizarEstilo(null), normalizarEstilo({}))
+})
+
+test("estilo: intro y cierre, de la tarjeta de Studio a un video propio o ninguno", () => {
+  // un estilo guardado antes de que existieran: la tarjeta de Studio, como siempre
+  const viejo = normalizarEstilo({ colores: { acento: "#123456" } })
+  assert.deepEqual(viejo.intro, { modo: "studio", video: null })
+  assert.deepEqual(viejo.cierre, { modo: "studio", video: null })
+  assert.equal(VERSION_ESTILO, 1)
+  const video = { bucket: "longform", ruta: "cuenta/estilo/intro/intro-1.mp4" }
+  const e = normalizarEstilo({ intro: { modo: "video", video }, cierre: { modo: "ninguna" } })
+  assert.deepEqual(e.intro, { modo: "video", video })
+  assert.deepEqual(e.cierre, { modo: "ninguna", video: null })
+  // "video" sin archivo vale como la tarjeta; un modo raro tambien
+  assert.equal(normalizarExtremo({ modo: "video" }).modo, "studio")
+  assert.equal(normalizarExtremo({ modo: "otro", video }).modo, "studio")
+  assert.equal(normalizarExtremo({ modo: "video", video: { bucket: "longform", ruta: "" } }).modo, "studio")
+  // el video se conserva aunque se elija otro modo: se puede volver a el sin subirlo otra vez
+  assert.deepEqual(normalizarExtremo({ modo: "studio", video }), { modo: "studio", video })
+  // ida y vuelta: lo normalizado no cambia al normalizarlo otra vez
+  assert.deepEqual(normalizarEstilo(JSON.parse(JSON.stringify(e))), e)
+  assert.equal(formatoVideoMarca("intro.MOV", "video/quicktime"), "mov")
+  assert.equal(formatoVideoMarca("intro.mp4", ""), "mp4")
+  assert.equal(formatoVideoMarca("intro.mp3", "audio/mpeg"), null)
 })
 
 test("plantillas: huecos, condiciones y escape", () => {

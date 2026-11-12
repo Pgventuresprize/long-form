@@ -14,6 +14,7 @@ import hashlib
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import numpy as np
 
@@ -196,9 +197,54 @@ def tarjeta_clip(ctx, png, dur, out, fo, tamano=None):
     return out
 
 
+def video_propio(ctx, ruta, dur, out, tamano=None):
+    """La intro o el cierre propios de la marca (extremos.py), llevados al lienzo del video con los mismos
+    parametros que los trozos (cuadros por segundo, color, codificador): asi se unen sin recodificar. Dura
+    exactamente `dur` (ya en cuadros): si al clip le falta un cuadro al final se repite el ultimo."""
+    from ..lienzo import encajar_video
+    W, H = tamano or (ctx.W, ctx.H)
+    n = int(round(dur * ctx.FPS))
+    info = ffm.sondear(ruta)
+    p = Path(ruta)
+    firma = json.dumps(['vp1', str(p.resolve()), p.stat().st_size, n, W, H, ctx.FPS])
+    out = out.with_name(f'{out.stem}_{hashlib.md5(firma.encode()).hexdigest()[:12]}.mp4')
+    if out.exists() and out.stat().st_size > 1000:
+        return out
+    fc = (encajar_video(info['ancho'], info['alto'], W, H, ctx.FPS) +
+          ';[vp]tpad=stop_mode=clone:stop=15,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[fin]')
+    tmp = out.with_suffix('.tmp.mp4')
+    ffm.correr(['-t', f'{dur + 0.5:.3f}', '-i', ruta, '-filter_complex', fc, '-map', '[fin]', '-frames:v', str(n)]
+               + ffm.ENC + [tmp])
+    hechos = ffm.cuadros_de(tmp)
+    if hechos != n:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError(f'El video propio de la marca salió con {hechos} de {n} cuadros: revisa el archivo')
+    tmp.replace(out)
+    return out
+
+
+def extremo_clip(ctx, ext, parte, png, carpeta, lz):
+    """El clip de la intro o del cierre segun su modo, en el lienzo del video; None si no hay. La tarjeta de
+    Studio es la de siempre (mismos filtros y mismos nombres)."""
+    e = ext[parte]
+    tam = (lz.LW, lz.LH) if lz else None
+    if e['modo'] == 'ninguna' or e['s'] <= 0:
+        return None
+    if e['modo'] == 'video':
+        ruta = e['video'] if e['video'] and Path(e['video']).exists() else ctx.marca.video(parte)
+        if not ruta:
+            raise RuntimeError(f'No está el video propio de la marca para {"la intro" if parte == "intro" else "el cierre"}: '
+                               'vuelve a correr los gráficos')
+        return video_propio(ctx, ruta, e['s'], carpeta / f'{parte}_propio.mp4', tam)
+    fo = 0.4 if parte == 'intro' else 0.8
+    if lz:
+        return tarjeta_clip(ctx, png, e['s'], carpeta / f'{parte}_{lz.LW}x{lz.LH}.mp4', fo, tam)
+    return tarjeta_clip(ctx, png, e['s'], carpeta / f'{parte}_{ctx.W}.mp4', fo)
+
+
 def linea_final(gancho_s, intro, programa_s, outro):
-    """Donde empieza cada parte del video final, en segundos: gancho, tarjeta de intro, programa y cierre. Sin
-    gancho es la linea de siempre (intro en 0)."""
+    """Donde empieza cada parte del video final, en segundos: gancho, intro, programa y cierre. Sin gancho es la
+    linea de siempre (intro en 0); sin intro o sin cierre (0 s), el programa va pegado a lo que tenga al lado."""
     a = float(gancho_s or 0)
     return {'gancho': 0.0, 'intro': a, 'programa': a + intro, 'cierre': a + intro + programa_s,
             'total': a + intro + programa_s + outro}
@@ -271,9 +317,11 @@ def ganancia_ducking(voz, sr, baja_db=10.0, ventana=0.05, ataque=0.12, suelta=0.
     return np.repeat(10 ** (g / 20), h)[:n].astype(np.float32)
 
 
-def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=True, gancho=None):
+def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=True, gancho=None, extremos=None):
     """La mezcla del video final. `gancho`: (keep, mapa) del gancho, que suena antes de la intro; todo lo demas
-    se corre lo que dura."""
+    se corre lo que dura. `extremos`: la intro y el cierre resueltos (extremos.de_graficos); sin ellos, las
+    tarjetas de Studio con la musica de inicio y de cierre, como siempre. Un video propio suena con su audio
+    (si no trae, con la musica de la marca); sin intro o sin cierre no suena nada en su lugar."""
     sr = 48000
     tmp = ctx.tj('render') / 'programa_tratado.wav'
     # Ruido suave (afftdn a 8 dB): baja el zumbido de sala sin el sonido "bajo el agua". Un video ya editado
@@ -345,8 +393,33 @@ def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=Tru
         if ruta:
             return con_audio(str(ctx.local({'ruta': ruta, 'nombre_local': f'musica_{clave}_{Path(ruta).name}'})), 'La música elegida')
         return con_audio(m.musica(clave), 'La música de la marca')
-    musica_intro = cancion('intro')
-    musica_cierre = cancion('cierre')
+    ext = extremos or {}
+
+    def propio(parte, dur):
+        # El sonido del video propio de la marca, si lo trae: reemplaza la musica de ese momento.
+        e = ext.get(parte) or {}
+        if e.get('modo') != 'video' or not e.get('audio') or not e.get('video') or dur <= 0:
+            return None
+        p = ctx.tj('render') / f'tmp_{parte}_propio.wav'
+        # se corta antes de normalizar: loudnorm mide solo lo que de verdad suena en el video
+        ffm.extraer_audio(e['video'], p, sr, 2, f'atrim=0:{dur:.4f},asetpts=PTS-STARTPTS,loudnorm=I={lufs}:TP=-1.5')
+        _, y = ffm.leer_wav(p)
+        y = np.asarray(y)[:int(dur * sr)].copy()
+        if len(y) > 2 * xf:
+            y[:xf] *= r
+            y[-xf:] *= r[::-1]
+        return y
+
+    def con_musica(parte, dur):
+        # La tarjeta de Studio, o un video propio sin sonido, llevan la musica de la marca; sin intro, nada.
+        # Sin `extremos` se busca como siempre.
+        if not ext:
+            return True
+        e = ext.get(parte) or {}
+        return dur > 0 and e.get('modo', 'studio') != 'ninguna' and propio_de[parte] is None
+    propio_de = {'intro': propio('intro', intro), 'cierre': propio('cierre', outro)}
+    musica_intro = cancion('intro') if con_musica('intro', intro) else None
+    musica_cierre = cancion('cierre') if con_musica('cierre', outro) else None
     musica_fondo = cancion('fondo')
     if musica_fondo:
         # Fondo: bajo toda la conversacion, en bucle si es corta, y baja sola cuando alguien habla (ducking).
@@ -360,6 +433,9 @@ def audio(ctx, keep, mapa, piezas, wav_programa, intro, outro, reducir_ruido=Tru
         put(fo(carga(musica_intro, f'loudnorm=I={lufs}:TP=-1.5')[:int(intro * sr)], 1.6), L['intro'])
     if musica_cierre:
         put(fo(carga(musica_cierre, f'loudnorm=I={lufs}:TP=-1.5')[:int(outro * sr)], 2.0), L['cierre'])
+    for parte, at in (('intro', L['intro']), ('cierre', L['cierre'])):
+        if propio_de[parte] is not None:
+            put(propio_de[parte], at)
     cache = {}
     g_sfx = ctx.opcion('volumen_efectos', 0.7)
     for p in piezas:
@@ -400,7 +476,10 @@ def correr(ctx):
         graficos.correr(ctx)
         gr = ctx.estado['graficos']
     keep = [tuple(k) for k in ctx.estado['keep']]
-    intro, outro = gr['intro_s'], gr['cierre_s']
+    # la intro y el cierre que fijo la etapa de graficos (extremos.py): tarjeta, video de la marca o nada
+    from .. import extremos
+    ext = extremos.de_graficos(gr)
+    intro, outro = ext['intro']['s'], ext['cierre']['s']
     mapa = Mapa(keep, ctx.FPS, intro)
     tomas = ctx.estado.get('tomas_render') or ctx.estado['tomas']
     piezas = gr['piezas']
@@ -435,15 +514,11 @@ def correr(ctx):
             if hechos % 10 == 0 or hechos == len(trabajos):
                 ctx.avance(f'Trozo {hechos} de {len(trabajos)}', .85 * hechos / len(trabajos))
     salidas, salidas_g = hechas[:len(cs)], hechas[len(cs):]
-    if lz:
-        tam = (lz.LW, lz.LH)
-        ini = tarjeta_clip(ctx, gr['intro'], intro, carpeta / f'intro_{lz.LW}x{lz.LH}.mp4', 0.4, tam)
-        fin = tarjeta_clip(ctx, gr['cierre'], outro, carpeta / f'cierre_{lz.LW}x{lz.LH}.mp4', 0.8, tam)
-    else:
-        ini = tarjeta_clip(ctx, gr['intro'], intro, carpeta / f'intro_{ctx.W}.mp4', 0.4)
-        fin = tarjeta_clip(ctx, gr['cierre'], outro, carpeta / f'cierre_{ctx.W}.mp4', 0.8)
+    ini = extremo_clip(ctx, ext, 'intro', gr['intro'], carpeta, lz)
+    fin = extremo_clip(ctx, ext, 'cierre', gr['cierre'], carpeta, lz)
+    ini_l, fin_l = ([ini] if ini else []), ([fin] if fin else [])
     vid = carpeta / 'video.mp4'
-    ffm.concatenar(salidas_g + [ini] + salidas + [fin], vid)
+    ffm.concatenar(salidas_g + ini_l + salidas + fin_l, vid)
     final = vid
     subt = bool(ctx.eleccion('subtitulos', False))
     if subt:
@@ -451,11 +526,11 @@ def correr(ctx):
         con_s, con_s_g = subtitular(ctx, lz, gr.get('disposicion', 'pantalla'), mapa, mapa_g, keep_g, piezas,
                                     cs, cs_g, salidas, salidas_g, carpeta / 'subtitulos')
         final = carpeta / 'video_subtitulado.mp4'
-        ffm.concatenar(con_s_g + [ini] + con_s + [fin], final)
+        ffm.concatenar(con_s_g + ini_l + con_s + fin_l, final)
     ctx.avance('Mezclando audio', .93)
     from .. import tipos
     wav = audio(ctx, keep, mapa, piezas, tipos.programa(ctx, 48000), intro, outro, tipos.de(ctx).reduce_ruido_audio,
-                gancho=(keep_g, mapa_g) if keep_g else None)
+                gancho=(keep_g, mapa_g) if keep_g else None, extremos=ext)
     version = int(ctx.estado.get('render', {}).get('version', 0)) + 1
     nombre = nombre_salida(ctx, version)
     salida = ctx.salida / nombre
@@ -474,6 +549,8 @@ def correr(ctx):
                     subtitulos=subt, gancho_s=round(L['intro'], 2))
         if subt:
             info['limpio'] = str(vid)     # sin subtitulos, en la cache: de ahi salen los clips
+    if any(ext[p]['modo'] != 'studio' for p in extremos.PARTES):
+        info.update(intro=ext['intro']['modo'], cierre=ext['cierre']['modo'], intro_s=intro, cierre_s=outro)
     ctx.guardar('render', info)
     ctx.log(f'listo {nombre}')
 

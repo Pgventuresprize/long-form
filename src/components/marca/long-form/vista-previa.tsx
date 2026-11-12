@@ -47,7 +47,8 @@ export function VistaPrevia({ estilo, piezas, inicial }: { estilo: EstiloLongFor
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Pieza de la vista previa">
+      {/* Con una sola pieza (la tarjeta de intro o de cierre) no hay nada que elegir. */}
+      <div className={`flex-wrap gap-1.5 ${piezas.length > 1 ? "flex" : "hidden"}`} role="tablist" aria-label="Pieza de la vista previa">
         {piezas.map((p) => (
           <button
             key={p}

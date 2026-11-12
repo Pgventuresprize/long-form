@@ -47,8 +47,8 @@ nunca llega nada al video.
 
 ## Lo que elige la persona
 
-Studio deja en `spec.opciones`: `formato` (`16:9`, `9:16`, `1:1`), `duracion_objetivo_min`, `subtitulos`, `gancho`
-y `capitulos`. Se leen con `ctx.eleccion`: **lo que eligió la persona > lo que sugiere el referente > el defecto**
+Studio deja en `spec.opciones`: `formato` (`16:9`, `9:16`, `1:1`), `duracion_objetivo_min`, `subtitulos`, `gancho`,
+`capitulos` y, solo si se quitan, `intro` y `cierre` en false. Se leen con `ctx.eleccion`: **lo que eligió la persona > lo que sugiere el referente > el defecto**
 (16:9, sin subtítulos, sin gancho, con capítulos). Ojo: `ctx.opcion` es al revés (el referente manda) y sigue así
 para las perillas de estilo.
 
@@ -71,6 +71,20 @@ para las perillas de estilo.
   No se adapta: las etiquetas del plano doble (se omiten), el índice de capítulos del escenario (va dentro del cuadro
   encajado) y la versión dividida de los clips de Meet. 16:9 no cambia: mismos filtros y mismas firmas de trozo.
 - **Capítulos** en falso: no van en YouTube ni en el índice del escenario.
+- **Intro y cierre** (`extremos.py`, la única fuente de lo que duran). La marca elige en su estilo (`intro` y
+  `cierre`: `modo` y `video`) y cada video solo puede quitarlos (`spec.opciones.intro` / `cierre` en false; ausente
+  vale lo de la marca). Studio los apaga por defecto en los videos de hasta 2 min.
+  - `studio`: la tarjeta de siempre, 5,4 s y 6 s, con la música de inicio y de cierre. En 16:9, mismos filtros y
+    mismos archivos que antes (lo cuida `tests/prueba_intro.py`).
+  - `video`: el clip de la marca (MP4 o MOV) se baja con la marca (`estilo.armar`, carpeta `video/`), se mide con
+    ffprobe y se lleva al lienzo del video (`lienzo.encajar_video`: escalado si tiene la misma forma; si no, entero
+    sobre una copia desenfocada) con los mismos parámetros que los trozos (`ffm.ENC`), así se une sin recodificar.
+    Su duración es la de la intro o el cierre, hasta 30 s (más, se corta y se avisa). Suena con su audio; sin
+    pista de audio, con la música de la marca. Si no está o no se lee, va la tarjeta y se avisa.
+  - `ninguna`: 0 s. El video abre con el gancho o el programa y termina con él; capítulos, clips, control de calidad,
+    subtítulos y mezcla se corren lo que dure lo de antes (`contexto.desfase`, `render.linea_final`), que puede ser 0.
+  Se fija en la etapa de gráficos (`estado.graficos`: `intro_s`, `cierre_s` y, si alguno no es la tarjeta,
+  `intro_modo`, `cierre_modo`, `intro_video`...). La tarjeta de intro se dibuja siempre: es la portada de YouTube.
 
 ## Tipos de grabación
 
@@ -188,6 +202,9 @@ Después, en Vercel: `LF_MOTOR=modal`, `LF_MOTOR_URL=<url de despertar>` y `LF_M
 - **`tests/prueba_largo.py`:** quién manda en las opciones, subtítulos sobre un mapa con cortes y la regla de la
   franja (con el programa de subtítulos de verdad), el gancho (frases, línea de tiempo, capítulos y audio corridos),
   la duración objetivo, las ilustraciones a ritmo, y un trozo de verdad a 9:16 y 1:1 con ffmpeg.
+- **`tests/prueba_intro.py`:** la intro y el cierre: quién manda (el video > la marca > la tarjeta), la línea de
+  tiempo sin intro ni cierre (capítulos, gancho, subtítulos y audio), el audio de un video propio, un video propio
+  de verdad llevado a 16:9 y 9:16 con ffmpeg, y la tarjeta de Studio en 16:9 con los mismos filtros de siempre.
 - **`tests/prueba_hora.py`:** una hora por tipo, de punta a punta en Rápido. Deja el tiempo por etapa y la memoria
   máxima en `medida.json`.
 - **`scripts/longform-cola.test.ts`:** prueba la cola contra el Supabase local.

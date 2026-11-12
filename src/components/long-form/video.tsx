@@ -30,8 +30,10 @@ export function VistaVideo({ p, urls, alCorregir }: { p: Proyecto; urls: Record<
 
   const g = (p.estado.guion_aprobado ?? p.estado.guion ?? {}) as { capitulos?: { inicio: number; titulo: string }[]; youtube?: { titulo?: string; descripcion?: string } }
   const keep = (p.estado.keep ?? []) as [number, number][]
-  const intro = Number((p.estado.graficos as { intro_s?: number } | undefined)?.intro_s ?? 0)
-  // Los capitulos van en el tiempo del video editado: sin silencios ni cortes, y con la intro.
+  const gr = p.estado.graficos as { intro_s?: number; gancho_s?: number } | undefined
+  // Lo que va antes del programa, como en el motor (contexto.desfase): el gancho y la intro (0 s sin intro).
+  const intro = Number(gr?.gancho_s ?? 0) + Number(gr?.intro_s ?? 0)
+  // Los capitulos van en el tiempo del video editado: sin silencios ni cortes, y con el gancho y la intro.
   const capitulos = (g.capitulos ?? []).map((c, i) => `${mmss(i === 0 ? 0 : tiempoDeSalida(keep, 30, intro, c.inicio))} ${c.titulo}`)
   const problemas = qa.problemas ?? []
 

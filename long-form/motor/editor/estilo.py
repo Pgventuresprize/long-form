@@ -2,7 +2,8 @@
 
 Studio guarda el estilo como JSON (src/engine/long-form/estilo.ts) y sus archivos en Storage. El motor
 trabaja con una carpeta con marca.json y sus archivos, como los presets de antes. Aqui se arma esa carpeta
-una vez por version del estilo: colores, fuente, logos, CTA con su QR, textos, musica y efectos.
+una vez por version del estilo: colores, fuente, logos, CTA con su QR, textos, musica, efectos y la intro y el
+cierre (tarjeta de Studio, video propio o ninguno; ver extremos.py).
 """
 import json
 import re
@@ -51,6 +52,7 @@ def armar(cfg, bajar, destino, biblioteca):
     (d / 'logos').mkdir()
     (d / 'qr').mkdir()
     (d / 'audio').mkdir()
+    (d / 'video').mkdir()
 
     def traer(archivo, carpeta):
         if not archivo:
@@ -105,6 +107,18 @@ def armar(cfg, bajar, destino, biblioteca):
         bajar(config.BUCKET, fila['ruta'], d / 'audio' / nombre)
         return f'audio/{nombre}'
 
+    def extremo(parte):
+        # La intro o el cierre (extremos.py). El video propio solo se baja si se va a usar; si falta, la tarjeta.
+        x = cfg.get(parte) or {}
+        modo = x.get('modo') if x.get('modo') in ('studio', 'video', 'ninguna') else 'studio'
+        video = None
+        if modo == 'video':
+            v = x.get('video')
+            video = traer(v, 'video') if isinstance(v, dict) and v.get('bucket') and v.get('ruta') else None
+            if not video:
+                modo = 'studio'
+        return {'modo': modo, 'video': video}
+
     musica = cfg.get('musica') or {}
     sfx = cfg.get('sfx') or {}
     barra, popup, por_cta = GRAFICOS.get(cfg.get('graficos', 'normal'), GRAFICOS['normal'])
@@ -128,6 +142,8 @@ def armar(cfg, bajar, destino, biblioteca):
         'sfx': {SFX_MOTOR[k]: r for k, v in sfx.items() if k in SFX_MOTOR and v and (r := audio(v))},
         'volumen_efectos': sfx.get('volumen', 0.7),
         'textos': textos,
+        'intro': extremo('intro'),
+        'cierre': extremo('cierre'),
         'reglas': {'barras_por_cta_min': por_cta, 'barra_cada_min': barra, 'popup_cada_min': popup,
                    'cita_seg_min': 6.5, 'cita_seg_max': 8.5, 'cita_max_caracteres': 66},
         'subtitulos': cfg.get('subtitulos') or {},

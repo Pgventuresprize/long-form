@@ -79,6 +79,22 @@ function ascii(b: Uint8Array, desde: number, n: number): string {
   return s
 }
 
+// ------------------------------------------------------------------ intro y cierre propios
+
+/**
+ * La intro o el cierre que la marca ya tiene hechos (estilo `intro` / `cierre` en modo `video`): un MP4 o MOV de
+ * hasta 200 MB. Misma regla que la musica en video: extension y tipo en el navegador, firma en el servidor y
+ * ffprobe en el motor (si no se lee, va la tarjeta de Studio).
+ */
+export const ACEPTA_VIDEO_MARCA = ".mp4,.mov,video/mp4,video/quicktime"
+export const MENSAJE_VIDEO_MARCA = "La intro y el cierre tienen que ser un video MP4 o MOV."
+export const MENSAJE_TAMANO_VIDEO_MARCA = "El video no puede pasar de 200 MB."
+
+export function formatoVideoMarca(nombre: string, mime: string): "mp4" | "mov" | null {
+  const f = formatoPorNombre(nombre, mime)
+  return f === "mp4" || f === "mov" ? f : null
+}
+
 export function mimeDe(f: FormatoAudio): string {
   return { mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", aac: "audio/aac", mp4: "video/mp4", mov: "video/quicktime" }[f]
 }

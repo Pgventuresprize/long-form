@@ -86,6 +86,12 @@ class Marca:
         p = self.ruta(rel) if rel else None
         return str(p) if p and p.exists() else None
 
+    def video(self, parte):
+        """El video propio de la marca para la intro o el cierre (extremos.py), o None."""
+        rel = (self.cfg.get(parte) or {}).get('video')
+        p = self.ruta(rel) if rel else None
+        return str(p) if p and p.exists() else None
+
     def texto(self, clave, defecto=''):
         return self.cfg.get('textos', {}).get(clave, defecto)
 

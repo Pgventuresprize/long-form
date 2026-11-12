@@ -6,9 +6,23 @@ import QRCode from "qrcode"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 
-import { contenedorDe, FORMATOS_AUDIO, formatoPorFirma, formatoPorNombre, maxBytesDe, MENSAJE_FORMATO, mensajeTamano, mimeDe, type FormatoAudio } from "@/engine/long-form/audio"
+import {
+  contenedorDe,
+  FORMATOS_AUDIO,
+  formatoPorFirma,
+  formatoPorNombre,
+  formatoVideoMarca,
+  MAX_VIDEO_AUDIO_BYTES,
+  maxBytesDe,
+  MENSAJE_FORMATO,
+  MENSAJE_TAMANO_VIDEO_MARCA,
+  MENSAJE_VIDEO_MARCA,
+  mensajeTamano,
+  mimeDe,
+  type FormatoAudio,
+} from "@/engine/long-form/audio"
 import { sfxStudioDe } from "@/engine/long-form/sfx-studio"
-import { normalizarEstilo, type Archivo, type EstiloLongForm } from "@/engine/long-form/estilo"
+import { normalizarEstilo, PARTES_EXTREMO, type Archivo, type EstiloLongForm, type ParteExtremo } from "@/engine/long-form/estilo"
 import { BUCKET_LF, guardarEstilo, recursosDe } from "@/engine/long-form/estilo-datos"
 import { ejemplo, paginaDePieza, paginaDeSubtitulo, type Disposicion, type TipoPieza } from "@/engine/long-form/plantillas"
 import { supabaseAdmin } from "@/engine/supabase-admin"
@@ -27,7 +41,7 @@ const fallo = (e: unknown): { ok: false; error: string } => ({ ok: false, error:
 export async function guardarEstiloLongForm(config: unknown, opciones: { confirmar?: boolean } = {}): Promise<Hecho> {
   try {
     const accountId = await idDeCuentaCon("estilo_long_form")
-    const error = await guardarEstilo(accountId, normalizarEstilo(config), opciones.confirmar ? true : undefined)
+    const error = await guardarEstilo(accountId, extremosDeLaMarca(accountId, normalizarEstilo(config)), opciones.confirmar ? true : undefined)
     if (error) return { ok: false, error: `No se pudo guardar: ${error}` }
     revalidatePath("/marca")
     revalidatePath("/long-form")
@@ -59,6 +73,20 @@ export async function vistaPreviaLongForm(
 }
 
 // ------------------------------------------------------------------ audio
+
+/**
+ * Los primeros 16 bytes de una subida y su tamano real. Solo se piden esos bytes: un video puede pesar 200 MB y
+ * para la firma bastan 16.
+ */
+async function cabezaDe(ruta: string): Promise<{ cabeza: Uint8Array; tamano: number } | null> {
+  const { data: firmada } = await supabaseAdmin().storage.from(BUCKET_LF).createSignedUrl(ruta, 60)
+  const r = firmada?.signedUrl ? await fetch(firmada.signedUrl, { headers: { Range: "bytes=0-15" } }) : null
+  if (!r || !r.ok) return null
+  const cabeza = new Uint8Array(await r.arrayBuffer()).subarray(0, 16)
+  // El tamano real: "bytes 0-15/<total>" si el servidor respeto el rango; si no, lo que llego entero.
+  const total = Number(/\/(\d+)$/.exec(r.headers.get("content-range") ?? "")?.[1] ?? Number.NaN)
+  return { cabeza, tamano: Number.isFinite(total) ? total : Number(r.headers.get("content-length") ?? 0) }
+}
 
 /** Paso 1: el servidor valida nombre, tipo y tamano y da una direccion de subida de un solo uso. */
 export async function prepararSubidaAudio(datos: { nombre: string; mime: string; bytes: number }): Promise<Hecho<{ ruta: string; url: string }>> {
@@ -92,14 +120,9 @@ export async function registrarAudio(datos: {
     const accountId = await idDeCuentaCon("estilo_long_form")
     if (!datos.ruta.startsWith(`${accountId}/estilo/audio/`)) return { ok: false, error: "Esa subida no es de esta marca." }
     const db = supabaseAdmin()
-    // Solo los primeros bytes: un video puede pesar 200 MB y para la firma bastan 16.
-    const { data: firmada } = await db.storage.from(BUCKET_LF).createSignedUrl(datos.ruta, 60)
-    const r = firmada?.signedUrl ? await fetch(firmada.signedUrl, { headers: { Range: "bytes=0-15" } }) : null
-    if (!r || !r.ok) return { ok: false, error: "No encontramos el archivo subido. Intenta otra vez." }
-    const cabeza = new Uint8Array(await r.arrayBuffer()).subarray(0, 16)
-    // El tamano real: "bytes 0-15/<total>" si el servidor respeto el rango; si no, lo que llego entero.
-    const total = Number(/\/(\d+)$/.exec(r.headers.get("content-range") ?? "")?.[1] ?? Number.NaN)
-    const tamano = Number.isFinite(total) ? total : Number(r.headers.get("content-length") ?? 0)
+    const leido = await cabezaDe(datos.ruta)
+    if (!leido) return { ok: false, error: "No encontramos el archivo subido. Intenta otra vez." }
+    const { cabeza, tamano } = leido
     const ext = datos.ruta.split(".").pop() ?? ""
     const esperado = (FORMATOS_AUDIO as readonly string[]).includes(ext) ? (ext as FormatoAudio) : null
     if (!esperado || formatoPorFirma(cabeza) !== contenedorDe(esperado)) {
@@ -163,6 +186,72 @@ export async function urlDeAudio(id: string): Promise<Hecho<{ url: string; mime:
     const { data: firmada } = await db.storage.from(BUCKET_LF).createSignedUrl(f.ruta, 3600)
     if (!firmada?.signedUrl) return { ok: false, error: "No se pudo abrir el audio." }
     return { ok: true, url: firmada.signedUrl, mime: mimeDe(f.formato) }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+// ------------------------------------------------------------------ intro y cierre propios
+
+/** La carpeta de la intro y el cierre de la marca en el bucket de long form. */
+const carpetaExtremos = (accountId: string) => `${accountId}/estilo/intro/`
+
+/** Un video de intro o cierre es de esta marca solo si esta en su carpeta del bucket de long form. */
+const esDeLaMarca = (accountId: string, a: Archivo | null) => Boolean(a && a.bucket === BUCKET_LF && a.ruta.startsWith(carpetaExtremos(accountId)) && !a.ruta.includes(".."))
+
+/**
+ * Al guardar: la intro y el cierre solo pueden nombrar videos de la carpeta de esta marca (el motor los baja con
+ * permisos de servicio). Uno ajeno se quita y vuelve la tarjeta de Studio.
+ */
+function extremosDeLaMarca(accountId: string, e: EstiloLongForm): EstiloLongForm {
+  const limpio = (x: EstiloLongForm["intro"]) => (esDeLaMarca(accountId, x.video) ? x : { modo: x.modo === "video" ? ("studio" as const) : x.modo, video: null })
+  return { ...e, intro: limpio(e.intro), cierre: limpio(e.cierre) }
+}
+
+/** Paso 1: el servidor valida nombre, tipo y tamano y da una direccion de subida de un solo uso. */
+export async function prepararSubidaVideoMarca(datos: { parte: ParteExtremo; nombre: string; mime: string; bytes: number }): Promise<Hecho<{ ruta: string; url: string }>> {
+  try {
+    const accountId = await idDeCuentaCon("estilo_long_form")
+    if (!(PARTES_EXTREMO as readonly string[]).includes(datos.parte)) return { ok: false, error: "Eso no es la intro ni el cierre." }
+    const formato = formatoVideoMarca(datos.nombre, datos.mime)
+    if (!formato) return { ok: false, error: MENSAJE_VIDEO_MARCA }
+    if (!(datos.bytes > 0) || datos.bytes > MAX_VIDEO_AUDIO_BYTES) return { ok: false, error: MENSAJE_TAMANO_VIDEO_MARCA }
+    const ruta = `${carpetaExtremos(accountId)}${datos.parte}-${crypto.randomUUID()}.${formato}`
+    const { data, error } = await supabaseAdmin().storage.from(BUCKET_LF).createSignedUploadUrl(ruta)
+    if (error || !data) return { ok: false, error: `No se pudo preparar la subida: ${error?.message ?? "sin respuesta"}` }
+    return { ok: true, ruta, url: data.signedUrl }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+/** Paso 2: con el video ya subido, el servidor lee su firma; si por dentro no es MP4 ni MOV, se borra. */
+export async function registrarVideoMarca(datos: { ruta: string }): Promise<Hecho<{ archivo: Archivo }>> {
+  try {
+    const accountId = await idDeCuentaCon("estilo_long_form")
+    const archivo: Archivo = { bucket: BUCKET_LF, ruta: datos.ruta }
+    if (!esDeLaMarca(accountId, archivo)) return { ok: false, error: "Esa subida no es de esta marca." }
+    const leido = await cabezaDe(datos.ruta)
+    if (!leido) return { ok: false, error: "No encontramos el video subido. Intenta otra vez." }
+    const ext = datos.ruta.split(".").pop() ?? ""
+    if (!["mp4", "mov"].includes(ext) || formatoPorFirma(leido.cabeza) !== "mp4" || leido.tamano > MAX_VIDEO_AUDIO_BYTES) {
+      await supabaseAdmin().storage.from(BUCKET_LF).remove([datos.ruta])
+      return { ok: false, error: `${MENSAJE_VIDEO_MARCA} Este archivo no lo es por dentro.` }
+    }
+    return { ok: true, archivo }
+  } catch (e) {
+    return fallo(e)
+  }
+}
+
+/** Para verlo en Marca: una URL de una hora, solo de los videos de esta marca. */
+export async function urlDeVideoMarca(archivo: Archivo): Promise<Hecho<{ url: string }>> {
+  try {
+    const accountId = await idDeCuentaCon("estilo_long_form")
+    if (!esDeLaMarca(accountId, archivo)) return { ok: false, error: "Ese video no es de esta marca." }
+    const { data } = await supabaseAdmin().storage.from(BUCKET_LF).createSignedUrl(archivo.ruta, 3600)
+    if (!data?.signedUrl) return { ok: false, error: "No se pudo abrir el video." }
+    return { ok: true, url: data.signedUrl }
   } catch (e) {
     return fallo(e)
   }
