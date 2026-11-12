@@ -95,7 +95,11 @@ export function AsiSeVera({
               `Subtítulos ${NOMBRE_TRIESTADO[opciones.subtitulos].toLowerCase()}`,
               `Gancho ${NOMBRE_TRIESTADO[opciones.gancho].toLowerCase()}`,
               opciones.capitulos ? "Con capítulos" : "Sin capítulos",
-            ].join(" · "),
+              opciones.intro ? null : "Sin intro",
+              opciones.cierre ? null : "Sin cierre",
+            ]
+              .filter(Boolean)
+              .join(" · "),
           ],
         ].map(([k, v]) => (
           <div key={String(k)} className="flex gap-3 py-2.5">

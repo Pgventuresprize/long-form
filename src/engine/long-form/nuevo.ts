@@ -143,8 +143,28 @@ export const TRIESTADOS = ["auto", "si", "no"] as const
 export type Triestado = (typeof TRIESTADOS)[number]
 export const NOMBRE_TRIESTADO: Record<Triestado, string> = { auto: "Auto", si: "Sí", no: "No" }
 
-export type OpcionesVideo = { formato: FormatoVideo; duracion: Duracion; subtitulos: Triestado; gancho: Triestado; capitulos: boolean }
-export const OPCIONES_BASE: OpcionesVideo = { formato: "16:9", duracion: "auto", subtitulos: "auto", gancho: "auto", capitulos: true }
+/**
+ * `intro` y `cierre`: true es "la de mi marca" (lo que diga su estilo: tarjeta de Studio, su video o ninguno);
+ * false la quita en este video.
+ */
+export type OpcionesVideo = { formato: FormatoVideo; duracion: Duracion; subtitulos: Triestado; gancho: Triestado; capitulos: boolean; intro: boolean; cierre: boolean }
+export const OPCIONES_BASE: OpcionesVideo = { formato: "16:9", duracion: "auto", subtitulos: "auto", gancho: "auto", capitulos: true, intro: true, cierre: true }
+
+/**
+ * En un video de hasta 2 minutos, una intro y un cierre (unos 11 s con las tarjetas de Studio) pesan demasiado:
+ * con esas duraciones arrancan apagados. La persona los puede volver a encender.
+ */
+export const DURACIONES_CORTAS: readonly Duracion[] = ["0.5-1", "1-2"]
+export const esDuracionCorta = (d: Duracion) => DURACIONES_CORTAS.includes(d)
+
+/**
+ * Cambiar la duracion: la intro y el cierre que la persona no toco siguen a la duracion (apagados en un video
+ * corto, encendidos si no); los que toco se quedan como los dejo.
+ */
+export function conDuracion(o: OpcionesVideo, duracion: Duracion, tocados: { intro: boolean; cierre: boolean }): OpcionesVideo {
+  const def = !esDuracionCorta(duracion)
+  return { ...o, duracion, intro: tocados.intro ? o.intro : def, cierre: tocados.cierre ? o.cierre : def }
+}
 
 const de = <T extends string>(lista: readonly T[], v: unknown): T | null => ((lista as readonly unknown[]).includes(v) ? (v as T) : null)
 
@@ -160,13 +180,18 @@ export function opcionesValidas(v: unknown): { ok: true; opciones: OpcionesVideo
   const gancho = de(TRIESTADOS, o.gancho ?? "auto")
   if (!subtitulos || !gancho) return { ok: false, error: "Elige Auto, Sí o No." }
   if (o.capitulos !== undefined && typeof o.capitulos !== "boolean") return { ok: false, error: "Capítulos va encendido o apagado." }
-  return { ok: true, opciones: { formato, duracion, subtitulos, gancho, capitulos: o.capitulos ?? OPCIONES_BASE.capitulos } }
+  if ((o.intro !== undefined && typeof o.intro !== "boolean") || (o.cierre !== undefined && typeof o.cierre !== "boolean")) return { ok: false, error: "La intro y el cierre van con los de tu marca o sin ellos." }
+  return {
+    ok: true,
+    opciones: { formato, duracion, subtitulos, gancho, capitulos: o.capitulos ?? OPCIONES_BASE.capitulos, intro: o.intro ?? OPCIONES_BASE.intro, cierre: o.cierre ?? OPCIONES_BASE.cierre },
+  }
 }
 
 /**
  * Lo que va a `spec.opciones` (el contrato con el motor): `formato` y `capitulos` siempre; con un rango
  * elegido, `duracion_rango_min` ([minimo, maximo] en minutos) y `duracion_objetivo_min` (el maximo: el motor
- * corta hasta caber); `subtitulos` y `gancho` solo si la persona dijo Si o No (en Auto no van, y decide el motor).
+ * corta hasta caber); `subtitulos` y `gancho` solo si la persona dijo Si o No (en Auto no van, y decide el motor);
+ * `intro` y `cierre` solo en false, cuando la persona los quita (sin ellos, el motor usa los de la marca).
  */
 export function opcionesDelSpec(o: OpcionesVideo): Record<string, number | boolean | string | number[]> {
   const r: Record<string, number | boolean | string | number[]> = { formato: o.formato, capitulos: o.capitulos }
@@ -177,6 +202,8 @@ export function opcionesDelSpec(o: OpcionesVideo): Record<string, number | boole
   }
   if (o.subtitulos !== "auto") r.subtitulos = o.subtitulos === "si"
   if (o.gancho !== "auto") r.gancho = o.gancho === "si"
+  if (o.intro === false) r.intro = false
+  if (o.cierre === false) r.cierre = false
   return r
 }
 

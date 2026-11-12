@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { NIVELES, NOMBRE_NIVEL, type Nivel } from "@/engine/long-form/estilo"
-import { agregarIndicacion, FORMATOS_VIDEO, NOMBRE_TRIESTADO, TRIESTADOS, type OpcionesVideo } from "@/engine/long-form/nuevo"
+import { agregarIndicacion, conDuracion, esDuracionCorta, FORMATOS_VIDEO, NOMBRE_TRIESTADO, TRIESTADOS, type OpcionesVideo } from "@/engine/long-form/nuevo"
 
 import { ErrorCampo, Segmentado } from "./comun"
 import { DuracionDeslizable } from "./duracion"
@@ -78,6 +78,13 @@ export function Indicaciones({
   const [mas, setMas] = React.useState(false)
   const caja = React.useRef<HTMLTextAreaElement>(null)
   const cambiar = <K extends keyof OpcionesVideo>(k: K, v: OpcionesVideo[K]) => onOpciones({ ...opciones, [k]: v })
+  // La intro y el cierre siguen a la duracion (apagados en un video corto) hasta que la persona los toca.
+  const [tocados, setTocados] = React.useState({ intro: false, cierre: false })
+  const extremo = (k: "intro" | "cierre", v: boolean) => {
+    setTocados((t) => ({ ...t, [k]: true }))
+    cambiar(k, v)
+  }
+  const corto = esDuracionCorta(opciones.duracion)
   // Si falta el titulo, se abre "Mas opciones" para que se vea el campo y su aviso.
   const abierto = mas || Boolean(errorTitulo)
 
@@ -136,7 +143,7 @@ export function Indicaciones({
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
         <Segmentado etiqueta="Formato" valor={opciones.formato} opciones={FORMATOS_VIDEO.map((f) => ({ valor: f, nombre: f }))} onCambio={(v) => cambiar("formato", v)} deshabilitado={ocupado} />
-        <DuracionDeslizable valor={opciones.duracion} onCambio={(v) => cambiar("duracion", v)} deshabilitado={ocupado} />
+        <DuracionDeslizable valor={opciones.duracion} onCambio={(v) => onOpciones(conDuracion(opciones, v, tocados))} deshabilitado={ocupado} />
         <span className="flex items-center gap-1.5 text-xs">
           <span className="text-muted-foreground" aria-hidden>
             Subtítulos
@@ -157,6 +164,10 @@ export function Indicaciones({
           {cuenta}
         </span>
       </div>
+
+      {corto && !opciones.intro && !opciones.cierre ? (
+        <p className="text-muted-foreground mt-2 text-xs">En un video corto, la intro y el cierre ocupan mucho: van apagados. Puedes encenderlos en Más opciones.</p>
+      ) : null}
 
       {falta || error ? (
         <div className="mt-2 flex flex-col gap-1">
@@ -188,6 +199,40 @@ export function Indicaciones({
               placeholder="Por ejemplo: IA en deportes, con César"
             />
             <ErrorCampo id="lf-titulo-error">{errorTitulo}</ErrorCampo>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+              <span className="flex items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground" aria-hidden>
+                  Intro
+                </span>
+                <Segmentado
+                  etiqueta="Intro"
+                  valor={opciones.intro ? "si" : "no"}
+                  opciones={[
+                    { valor: "si", nombre: "La de mi marca" },
+                    { valor: "no", nombre: "Sin intro" },
+                  ]}
+                  onCambio={(v) => extremo("intro", v === "si")}
+                  deshabilitado={ocupado}
+                />
+              </span>
+              <span className="flex items-center gap-1.5 text-xs">
+                <span className="text-muted-foreground" aria-hidden>
+                  Cierre
+                </span>
+                <Segmentado
+                  etiqueta="Cierre"
+                  valor={opciones.cierre ? "si" : "no"}
+                  opciones={[
+                    { valor: "si", nombre: "El de mi marca" },
+                    { valor: "no", nombre: "Sin cierre" },
+                  ]}
+                  onCambio={(v) => extremo("cierre", v === "si")}
+                  deshabilitado={ocupado}
+                />
+              </span>
+            </div>
           </div>
           <Opciones etiqueta="¿Cuánto quieres revisar?" valor={nivel} opciones={NIVELES.map((n) => ({ valor: n, nombre: NOMBRE_NIVEL[n], detalle: DETALLE[n] }))} onCambio={onNivel} />
           {ctas.length ? (

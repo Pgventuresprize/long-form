@@ -1,11 +1,11 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { agregarIndicacion, conUso, DURACIONES, NOMBRE_DURACION, RANGO_DURACION, encajaEnTipo, mover, opcionesDelSpec, opcionesValidas, OPCIONES_BASE, ordenDeFuentes, tipoDeApoyo, tituloDeArchivo, usoLibre } from "../src/engine/long-form/nuevo"
+import { agregarIndicacion, conDuracion, conUso, DURACIONES, esDuracionCorta, NOMBRE_DURACION, RANGO_DURACION, encajaEnTipo, mover, opcionesDelSpec, opcionesValidas, OPCIONES_BASE, ordenDeFuentes, tipoDeApoyo, tituloDeArchivo, usoLibre } from "../src/engine/long-form/nuevo"
 
 test("nuevo: spec.opciones lleva formato y capitulos siempre; lo demas solo si se eligio", () => {
   assert.deepEqual(opcionesDelSpec(OPCIONES_BASE), { formato: "16:9", capitulos: true })
-  assert.deepEqual(opcionesDelSpec({ formato: "9:16", duracion: "15-30", subtitulos: "no", gancho: "si", capitulos: false }), {
+  assert.deepEqual(opcionesDelSpec({ formato: "9:16", duracion: "15-30", subtitulos: "no", gancho: "si", capitulos: false, intro: true, cierre: true }), {
     formato: "9:16",
     capitulos: false,
     duracion_rango_min: [15, 30],
@@ -17,6 +17,37 @@ test("nuevo: spec.opciones lleva formato y capitulos siempre; lo demas solo si s
   assert.equal(opcionesDelSpec({ ...OPCIONES_BASE, duracion: "60-120" }).duracion_objetivo_min, 120)
   assert.equal("duracion_rango_min" in opcionesDelSpec(OPCIONES_BASE), false)
   assert.equal("subtitulos" in opcionesDelSpec({ ...OPCIONES_BASE, subtitulos: "auto" }), false)
+})
+
+test("nuevo: la intro y el cierre solo van al spec cuando se quitan", () => {
+  // con los de la marca no va nada: el motor usa lo que diga el estilo
+  assert.equal("intro" in opcionesDelSpec(OPCIONES_BASE), false)
+  assert.equal("cierre" in opcionesDelSpec(OPCIONES_BASE), false)
+  assert.deepEqual(opcionesDelSpec({ ...OPCIONES_BASE, intro: false }), { formato: "16:9", capitulos: true, intro: false })
+  assert.deepEqual(opcionesDelSpec({ ...OPCIONES_BASE, intro: false, cierre: false }), { formato: "16:9", capitulos: true, intro: false, cierre: false })
+  // del navegador: booleanos o nada (nada es "la de mi marca")
+  const r = opcionesValidas({ cierre: false })
+  assert.ok(r.ok && r.opciones.intro === true && r.opciones.cierre === false)
+  assert.equal(opcionesValidas({ intro: "no" }).ok, false)
+})
+
+test("nuevo: en un video corto la intro y el cierre arrancan apagados, salvo que la persona los toque", () => {
+  const nada = { intro: false, cierre: false }
+  assert.equal(esDuracionCorta("0.5-1"), true)
+  assert.equal(esDuracionCorta("1-2"), true)
+  assert.equal(esDuracionCorta("2-4"), false)
+  assert.equal(esDuracionCorta("auto"), false)
+  const corto = conDuracion(OPCIONES_BASE, "0.5-1", nada)
+  assert.deepEqual([corto.duracion, corto.intro, corto.cierre], ["0.5-1", false, false])
+  assert.deepEqual(opcionesDelSpec(corto), { formato: "16:9", capitulos: true, duracion_rango_min: [0.5, 1], duracion_objetivo_min: 1, intro: false, cierre: false })
+  // al volver a un video largo, vuelven
+  const largo = conDuracion(corto, "8-15", nada)
+  assert.deepEqual([largo.intro, largo.cierre], [true, true])
+  // la que la persona encendio a mano se queda encendida; la otra sigue a la duracion
+  const aMano = conDuracion({ ...OPCIONES_BASE, intro: true }, "1-2", { intro: true, cierre: false })
+  assert.deepEqual([aMano.intro, aMano.cierre], [true, false])
+  // y la que apago a mano se queda apagada en un video largo
+  assert.equal(conDuracion({ ...OPCIONES_BASE, cierre: false }, "15-30", { intro: false, cierre: true }).cierre, false)
 })
 
 test("nuevo: los rangos de duracion crecen en escala logaritmica, sin huecos", () => {
